@@ -20,12 +20,10 @@ const OrdersPage = () => {
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [products, setProducts] = useState([]);
   
-  // Estados de control
   const [editingOrder, setEditingOrder] = useState(null);
   const [selectedOrder, setSelectedOrder] = useState(null);
   const [isDetailsOpen, setIsDetailsOpen] = useState(false);
   
-  // ✅ OPTIMIZACIÓN: Paginación y Totales del Servidor
   const [dateFilter, setDateFilter] = useState({ start: '', end: '' });
   const [searchTerm, setSearchTerm] = useState('');
   const [currentPage, setCurrentPage] = useState(1);
@@ -33,7 +31,6 @@ const OrdersPage = () => {
   const [summary, setSummary] = useState({ pendingARS: 0, pendingUSD: 0 });
   const itemsPerPage = 15;
 
-  // Form State
   const [orderForm, setOrderForm] = useState({
     client_name: '', products: [], custom_products: [], 
     currency: 'ARS', paid_amount: 0, order_date: getArgentinaDate(), notes: '' 
@@ -43,7 +40,6 @@ const OrdersPage = () => {
   const [selectedQty, setSelectedQty] = useState(1);
   const [customProductForm, setCustomProductForm] = useState({ name: '', price: 0, quantity: 1 });
 
-  // ✅ FETCH OPTIMIZADO POR SERVIDOR
   const fetchOrders = useCallback(async () => {
     setLoading(true);
     const from = (currentPage - 1) * itemsPerPage;
@@ -252,9 +248,9 @@ const OrdersPage = () => {
                 </div>
               </div>
 
-              {/* ✅ TABLA DE PRODUCTOS AGREGADOS (VISTA EN MODAL) */}
+              {/* ✅ TABLA DE PRODUCTOS AGREGADOS (VISTA EN MODAL) - AHORA ARRIBA DEL TOTAL */}
               {(orderForm.products.length > 0 || orderForm.custom_products.length > 0) && (
-                <div className="border border-gray-100 rounded-2xl overflow-hidden shadow-sm">
+                <div className="border border-gray-100 rounded-2xl overflow-hidden shadow-sm mt-2">
                   <table className="w-full text-sm">
                     <thead className="bg-gray-50 text-[10px] font-black uppercase text-gray-400"><tr><th className="p-3 text-left">Producto</th><th className="p-3 text-center">Cant.</th><th className="p-3 text-right">Precio</th><th className="p-3"></th></tr></thead>
                     <tbody className="divide-y divide-gray-100">
@@ -266,12 +262,12 @@ const OrdersPage = () => {
               )}
 
               <div className="grid grid-cols-2 gap-4 items-end bg-indigo-50/30 p-5 rounded-2xl">
-                <div className="space-y-2"><label className="text-xs font-black uppercase text-gray-400 ml-1">Moneda</label><select className="flex h-12 w-full rounded-xl border border-input bg-white px-3 py-2 text-sm font-bold focus:ring-2 focus:ring-indigo-500" value={orderForm.currency} onChange={e => setOrderForm({...orderForm, currency: e.target.value})}><option value="ARS">ARS ($)</option><option value="USD">USD (US$)</option></select></div>
+                <div className="space-y-2"><label className="text-xs font-black uppercase text-gray-400 ml-1">Moneda</label><select className="flex h-12 w-full rounded-xl border border-input bg-white px-3 py-2 text-sm font-bold focus:ring-2 focus:ring-indigo-500" value={orderForm.currency} onChange={e => setOrderForm({...orderForm, currency: e.target.value})}><option value="ARS">Peso Argentino ($)</option><option value="USD">Dólar (US$)</option></select></div>
                 <div className="space-y-2"><label className="text-xs font-black uppercase text-gray-400 ml-1">Abonado (Seña)</label><Input type="number" value={orderForm.paid_amount} onFocus={e => e.target.select()} onChange={e => setOrderForm({...orderForm, paid_amount: e.target.value})} className="rounded-xl h-12 bg-white font-bold text-green-600 focus:ring-2 focus:ring-green-500" /></div>
               </div>
               <div className="flex justify-between items-center bg-indigo-600 p-6 rounded-2xl text-white shadow-xl shadow-indigo-100"><span className="font-bold opacity-80 uppercase text-xs tracking-widest">Total Estimado</span><span className="text-3xl font-black tracking-tighter">{orderForm.currency === 'USD' ? 'US$' : '$'}{calculateTotal().toLocaleString('es-AR')}</span></div>
             </div>
-            <DialogFooter><Button variant="ghost" onClick={() => setIsDialogOpen(false)} className="font-bold rounded-xl">Cancelar</Button><Button onClick={handleSubmitOrder} className="bg-indigo-600 hover:bg-indigo-700 rounded-xl h-12 px-8 font-black uppercase text-xs tracking-wider">Guardar Pedido</Button></DialogFooter>
+            <DialogFooter><Button variant="ghost" onClick={() => setIsDialogOpen(false)} className="font-bold rounded-xl">Cancelar</Button><Button onClick={handleSubmitOrder} className="bg-indigo-600 hover:bg-indigo-700 rounded-xl h-12 px-8 font-black uppercase text-xs tracking-wider">Guardar</Button></DialogFooter>
           </DialogContent>
         </Dialog>
       </div>
@@ -299,7 +295,7 @@ const OrdersPage = () => {
         {loading ? (
           <div className="flex flex-col items-center justify-center p-20 text-indigo-500"><Loader2 className="w-10 h-10 animate-spin mb-4" /><p className="font-bold uppercase text-[10px] tracking-widest">Cargando...</p></div>
         ) : orders.length === 0 ? (
-          <div className="text-center p-20 bg-white rounded-3xl border border-dashed border-gray-200 text-gray-400 flex flex-col items-center"><Package className="w-12 h-12 mb-4 opacity-20" /><p className="font-medium italic">Sin registros encontrados.</p></div>
+          <div className="text-center p-20 bg-white rounded-3xl border border-dashed border-gray-200 text-gray-400 flex flex-col items-center"><Package className="w-12 h-12 mb-4 opacity-20" /><p className="font-medium italic">Sin registros.</p></div>
         ) : (
           <>
             {orders.map((order) => {
@@ -308,7 +304,7 @@ const OrdersPage = () => {
                 <motion.div key={order.id} initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="bg-white rounded-3xl p-6 shadow-sm border border-gray-100 hover:border-indigo-100 transition-all group">
                   <div className="flex flex-col md:flex-row justify-between gap-6">
                     <div className="flex-1 space-y-3">
-                      <div className="flex items-center gap-3"><h3 className="text-xl font-black text-gray-900 group-hover:text-indigo-600 transition-colors">{order.client_name}</h3><span className={`px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-tighter ${getStatusColor(order.status)}`}>{order.status}</span></div>
+                      <div className="flex items-center gap-3"><h3 className="text-xl font-black text-gray-900 group-hover:text-indigo-600 transition-colors">{order.client_name}</h3><span className={`px-3 py-1 rounded-full text-[10px] font-black uppercase ${getStatusColor(order.status)}`}>{order.status}</span></div>
                       {order.notes && (<div className="flex items-start gap-2 bg-gray-50 p-2 rounded-lg border border-gray-100 max-w-md"><StickyNote className="w-3.5 h-3.5 text-amber-500 mt-1 shrink-0" /><p className="text-xs text-gray-600 line-clamp-2 italic">{order.notes}</p></div>)}
                       
                       {/* ✅ MUESTRA DETALLE DE PRODUCTOS EN LA CARD */}
@@ -354,8 +350,9 @@ const OrdersPage = () => {
         )}
       </div>
 
+      {/* ✅ MODAL DE DETALLE RESPONSIVE CORREGIDO */}
       <Dialog open={isDetailsOpen} onOpenChange={setIsDetailsOpen}>
-        <DialogContent className="max-w-2xl bg-white rounded-3xl shadow-2xl border-none">
+        <DialogContent className="max-w-2xl w-[95vw] max-h-[90vh] overflow-y-auto bg-white rounded-3xl shadow-2xl border-none p-4 md:p-6">
           <DialogHeader><DialogTitle className="flex items-center gap-2 text-2xl font-black"><Info className="w-6 h-6 text-indigo-600" /> Detalle - {selectedOrder?.client_name}</DialogTitle></DialogHeader>
           {selectedOrder && (
             <div className="space-y-6 py-4">
@@ -364,11 +361,15 @@ const OrdersPage = () => {
                 <div className="space-y-1"><p className="text-gray-400 uppercase tracking-widest">Estado</p><span className={`px-3 py-1 rounded-full text-[10px] font-black uppercase inline-block ${getStatusColor(selectedOrder.status)}`}>{selectedOrder.status}</span></div>
               </div>
               {selectedOrder.notes && (<div className="p-4 bg-amber-50 rounded-2xl border border-amber-100 text-sm italic"><strong>Nota:</strong> {selectedOrder.notes}</div>)}
-              <div className="border border-gray-100 rounded-2xl overflow-hidden shadow-sm"><table className="w-full text-sm">
-                <thead className="bg-gray-50/50 font-black text-[10px] uppercase text-gray-400"><tr><th className="p-4 text-left">Ítem</th><th className="p-4 text-center">Cant.</th><th className="p-4 text-right">Unitario</th><th className="p-4 text-right">Subtotal</th></tr></thead>
-                <tbody className="divide-y">{[...(selectedOrder.products || []), ...(selectedOrder.custom_products || [])].map((p, i) => (
-                  <tr key={i} className="hover:bg-gray-50/30 transition-all"><td className="p-4 font-bold text-gray-800">{p.name}</td><td className="p-4 text-center font-bold">{p.quantity}</td><td className="p-4 text-right font-medium text-gray-500">{selectedOrder.currency === 'USD' ? 'US$' : '$'}{Number(p.price).toLocaleString('es-AR')}</td><td className="p-4 text-right font-black text-gray-900">{selectedOrder.currency === 'USD' ? 'US$' : '$'}{(Number(p.price) * Number(p.quantity)).toLocaleString('es-AR')}</td></tr>))}</tbody>
-              </table></div>
+              
+              <div className="border border-gray-100 rounded-2xl overflow-x-auto shadow-sm">
+                <table className="w-full text-sm min-w-[400px]">
+                  <thead className="bg-gray-50/50 font-black text-[10px] uppercase text-gray-400"><tr><th className="p-4 text-left">Ítem</th><th className="p-4 text-center">Cant.</th><th className="p-4 text-right">Unitario</th><th className="p-4 text-right">Subtotal</th></tr></thead>
+                  <tbody className="divide-y">{[...(selectedOrder.products || []), ...(selectedOrder.custom_products || [])].map((p, i) => (
+                    <tr key={i} className="hover:bg-gray-50/30 transition-all"><td className="p-4 font-bold text-gray-800">{p.name}</td><td className="p-4 text-center font-bold">{p.quantity}</td><td className="p-4 text-right font-medium text-gray-500">{selectedOrder.currency === 'USD' ? 'US$' : '$'}{Number(p.price).toLocaleString('es-AR')}</td><td className="p-4 text-right font-black text-gray-900">{selectedOrder.currency === 'USD' ? 'US$' : '$'}{(Number(p.price) * Number(p.quantity)).toLocaleString('es-AR')}</td></tr>))}</tbody>
+                </table>
+              </div>
+
               <div className="flex flex-col items-end gap-2 bg-indigo-900/5 p-6 rounded-2xl border border-indigo-100 shadow-inner">
                 <div className="text-4xl font-black text-indigo-900 tracking-tighter">{selectedOrder.currency === 'USD' ? 'US$' : '$'}{Number(selectedOrder.total_amount).toLocaleString('es-AR')}</div>
                 <div className="flex gap-4 pt-2 border-t border-indigo-100 w-full justify-end uppercase text-[9px] font-black tracking-widest">
@@ -378,7 +379,7 @@ const OrdersPage = () => {
               </div>
             </div>
           )}
-          <DialogFooter className="gap-2 sm:gap-0"><Button variant="outline" className="rounded-xl font-bold" onClick={() => setIsDetailsOpen(false)}>Cerrar Detalle</Button><Button className="bg-green-700 hover:bg-green-800 text-white rounded-xl font-bold shadow-lg" onClick={() => generatePDF(selectedOrder)}><FileText className="w-4 h-4 mr-2" /> PDF</Button></DialogFooter>
+          <DialogFooter className="gap-2 sm:gap-0 mt-4 flex-col sm:flex-row"><Button variant="outline" className="w-full sm:w-auto rounded-xl font-bold" onClick={() => setIsDetailsOpen(false)}>Cerrar Detalle</Button><Button className="w-full sm:w-auto bg-green-700 hover:bg-green-800 text-white rounded-xl font-bold shadow-lg" onClick={() => generatePDF(selectedOrder)}><FileText className="w-4 h-4 mr-2" /> Descargar PDF</Button></DialogFooter>
         </DialogContent>
       </Dialog>
     </div>
