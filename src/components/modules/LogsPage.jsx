@@ -1,14 +1,17 @@
 import React, { useState, useEffect } from 'react';
 import { useParams } from 'react-router-dom';
 import { motion } from 'framer-motion';
-import { User, Calendar, Loader2 } from 'lucide-react';
+import { User, Calendar, Loader2, Mail, Send } from 'lucide-react';
 import { formatDateTime } from '@/lib/utils';
 import { supabase } from '@/lib/customSupabaseClient';
+import { Button } from '@/components/ui/button';
+import { toast } from '@/components/ui/use-toast';
 
 const LogsPage = () => {
   const { branchId } = useParams();
   const [logs, setLogs] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [isSendingEmail, setIsSendingEmail] = useState(false);
   const [branchName, setBranchName] = useState('Sucursal');
 
   const translateAction = (action) => {
@@ -26,16 +29,11 @@ const LogsPage = () => {
     let translated = desc;
 
     const patterns = [
-      // 1. Casos específicos de creación (Para que diga "Gasto" y no "egresos")
       { regex: /Created new expenses record/i, replacement: 'Nuevo registro de Gasto creado' },
       { regex: /Created new cash_expenses record/i, replacement: 'Nuevo registro de Egreso de Caja creado' },
-      
-      // 2. Traducción de acciones con parámetros
       { regex: /Deleted (.*) record/i, replacement: 'Registro de $1 eliminado' },
       { regex: /Updated (.*) record/i, replacement: 'Registro de $1 actualizado' },
       { regex: /Created new (.*) record/i, replacement: 'Nuevo registro de $1 creado' },
-      
-      // 3. Formatos de detalle (Importante: Cash Expense va primero)
       { regex: /Cash Expense: (.*) \((.*)\)/i, replacement: 'Egreso CAJA: $1 ($2)' },
       { regex: /Expense: (.*) \((.*)\)/i, replacement: 'Nuevo Egreso CAJA: $1 ($2)' },
       { regex: /UPDATE Product: (.*)/i, replacement: 'Producto EDITADO: $1' },
@@ -49,7 +47,6 @@ const LogsPage = () => {
       translated = translated.replace(regex, replacement);
     });
 
-    // 4. Mapeo de términos individuales finales
     const terms = {
       'cash_expenses': 'egresos de caja',
       'sales': 'ventas',
@@ -91,6 +88,37 @@ const LogsPage = () => {
     setLoading(false);
   };
 
+  // ✅ NUEVA FUNCIÓN DE ENVÍO DE EMAIL
+  const handleSendTestEmail = async () => {
+    setIsSendingEmail(true);
+    try {
+      // Invocamos la Edge Function de Supabase
+      const { data, error } = await supabase.functions.invoke('send-test-email', {
+        body: { 
+          to: 'puoxxyt@gmail.com',
+          subject: `Prueba de Email - Sucursal ${branchName}`,
+          message: 'Este es un correo de prueba enviado desde el sistema de logs.'
+        },
+      });
+
+      if (error) throw error;
+
+      toast({
+        title: "¡Email Enviado!",
+        description: "Revisá la casilla tomasace2727@gmail.com",
+      });
+    } catch (err) {
+      console.error("Error enviando email:", err);
+      toast({
+        variant: "destructive",
+        title: "Error al enviar",
+        description: "Asegurate de tener configurada la Edge Function en Supabase.",
+      });
+    } finally {
+      setIsSendingEmail(false);
+    }
+  };
+
   return (
     <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="space-y-6">
       <div className="flex justify-between items-end">
@@ -98,8 +126,27 @@ const LogsPage = () => {
           <h1 className="text-2xl font-bold text-gray-900">Registro de Actividad</h1>
           <p className="text-gray-500 text-sm">Auditoría de acciones en el sistema (ART)</p>
         </div>
-        <div className="text-xs font-medium text-indigo-600 bg-indigo-50 px-3 py-1 rounded-full border border-indigo-100">
-          Sucursal: {branchName}
+        
+        <div className="flex items-center gap-3">
+          {/* ✅ BOTÓN DE PRUEBA DE EMAIL */}
+          <Button 
+            variant="outline" 
+            size="sm" 
+            onClick={handleSendTestEmail} 
+            disabled={isSendingEmail}
+            className="bg-white border-indigo-200 text-indigo-600 hover:bg-indigo-50"
+          >
+            {isSendingEmail ? (
+              <Loader2 className="w-4 h-4 animate-spin mr-2" />
+            ) : (
+              <Mail className="w-4 h-4 mr-2" />
+            )}
+            Probar Email
+          </Button>
+
+          <div className="text-xs font-medium text-indigo-600 bg-indigo-50 px-3 py-1 rounded-full border border-indigo-100">
+            Sucursal: {branchName}
+          </div>
         </div>
       </div>
 

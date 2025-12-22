@@ -10,11 +10,15 @@ import LoginPage from "@/pages/LoginPage";
 import PostLoginRedirect from "@/pages/PostLoginRedirect";
 import OwnerDashboard from "@/pages/OwnerDashboard";
 import BranchDashboard from "@/pages/BranchDashboard";
-
+import ScanProvider from "@/scan/ScanProvider";
+import GlobalScanListener from "@/scan/GlobalScanListener";
+import ScanDialog from "@/scan/ScanDialog";
 function App() {
   return (
     <AuthProvider>
+<ScanProvider>
       <Router>
+        <GlobalScanListener />
         <Helmet>
           <title>Franquify ERP - Sistema de Gestión de Franquicias</title>
           <meta
@@ -55,7 +59,9 @@ function App() {
         </Routes>
 
         <Toaster />
+        <ScanDialog />
       </Router>
+      </ScanProvider>
     </AuthProvider>
   );
 }
