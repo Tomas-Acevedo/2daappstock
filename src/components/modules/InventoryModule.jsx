@@ -1,9 +1,9 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { useParams } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { 
   Package, Plus, Search, Trash2, Edit, Tag, 
-  ShieldCheck, Loader2, Barcode 
+  ShieldCheck, Loader2, Barcode, Layers, ChevronLeft, ChevronRight, Filter
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input'; 
@@ -23,90 +23,148 @@ const InventoryModule = () => {
   const { branchId } = useParams();
   const { user } = useAuth();
   
+  const [activeTab, setActiveTab] = useState('products');
   const [products, setProducts] = useState([]);
   const [categories, setCategories] = useState([]);
   const [branchConfig, setBranchConfig] = useState(null);
   const [filter, setFilter] = useState('');
   const [loading, setLoading] = useState(true);
+
+  // ✅ ESTADOS DE OPTIMIZACIÓN (SERVIDOR)
+  const [categoryFilter, setCategoryFilter] = useState('all');
+  const [stockFilter, setStockFilter] = useState('all');
+  const [currentPage, setCurrentPage] = useState(1);
+  const [totalCount, setTotalCount] = useState(0);
+  const itemsPerPage = 20;
   
   const [isProductDialogOpen, setIsProductDialogOpen] = useState(false);
+  const [isCategoryDialogOpen, setIsCategoryDialogOpen] = useState(false);
   const [editingItem, setEditingItem] = useState(null);
+
   const [productForm, setProductForm] = useState({ 
     name: '', category_id: '', cost: 0, price: 0, stock: 0, barcode: '' 
   });
+  const [categoryForm, setCategoryForm] = useState({ name: '' });
 
-  useEffect(() => {
-    if (branchId) fetchData();
-  }, [branchId]);
-
-  const fetchData = async () => {
+  // ✅ FETCH OPTIMIZADO DE PRODUCTOS (SOLO TRAE 20)
+  const fetchProducts = useCallback(async () => {
+    if (activeTab !== 'products') return;
     setLoading(true);
-    try {
-      // Obtenemos configuración de permisos, categorías y productos
-      const [configRes, catsRes, prodsRes] = await Promise.all([
+    
+    const from = (currentPage - 1) * itemsPerPage;
+    const to = from + itemsPerPage - 1;
+
+    let query = supabase
+      .from('products')
+      .select('*', { count: 'exact' }) // Conteo exacto en el servidor
+      .eq('branch_id', branchId)
+      .order('name', { ascending: true })
+      .range(from, to);
+
+    // Filtro de búsqueda en servidor
+    if (filter) {
+      query = query.or(`name.ilike.%${filter}%,barcode.ilike.%${filter}%`);
+    }
+
+    // Filtro de categoría en servidor
+    if (categoryFilter !== 'all') {
+      query = query.eq('category_id', categoryFilter);
+    }
+
+    // Filtro de stock en servidor
+    if (stockFilter === 'in-stock') {
+      query = query.gt('stock', 0);
+    } else if (stockFilter === 'no-stock') {
+      query = query.lte('stock', 0);
+    }
+
+    const { data, count, error } = await query;
+
+    if (!error) {
+      setProducts(data || []);
+      setTotalCount(count || 0);
+    }
+    setLoading(false);
+  }, [branchId, currentPage, filter, categoryFilter, stockFilter, activeTab]);
+
+  // Carga inicial de categorías y configuración
+  useEffect(() => {
+    const loadInitialData = async () => {
+      const [configRes, catsRes] = await Promise.all([
         supabase.from('branches').select('allow_stock_edit').eq('id', branchId).single(),
-        supabase.from('categories').select('*').eq('branch_id', branchId),
-        supabase.from('products').select('*').eq('branch_id', branchId).order('name')
+        supabase.from('categories').select('*').eq('branch_id', branchId).order('name')
       ]);
-      
       setBranchConfig(configRes.data);
       setCategories(catsRes.data || []);
-      setProducts(prodsRes.data || []);
-    } catch (e) {
-      console.error("Error cargando inventario:", e);
-    } finally {
-      setLoading(false);
-    }
-  };
+    };
+    if (branchId) loadInitialData();
+  }, [branchId]);
 
-  // Validación de permisos: Propietario siempre puede, sucursal depende del switch
+  // Ejecutar fetch de productos cuando cambian los parámetros
+  useEffect(() => {
+    fetchProducts();
+  }, [fetchProducts]);
+
+  // Escuchar refrescos externos
+  useEffect(() => {
+    const handleRefresh = () => fetchProducts();
+    window.addEventListener('inventory:refresh', handleRefresh);
+    return () => window.removeEventListener('inventory:refresh', handleRefresh);
+  }, [fetchProducts]);
+
+  // Resetear página al filtrar
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [filter, categoryFilter, stockFilter]);
+
   const isOwner = user?.profile?.role === 'owner';
   const canEdit = isOwner || (branchConfig?.allow_stock_edit === true);
+
+  // Lógica de Categorías (se mantiene en memoria porque suelen ser pocas)
+  const filteredCategories = categories.filter(c => 
+    c.name.toLowerCase().includes(filter.toLowerCase())
+  );
 
   const handleSaveProduct = async () => {
     if (!canEdit) return;
     if (!productForm.name || !productForm.category_id) {
-      toast({ title: "Faltan datos", description: "Nombre y Categoría son obligatorios", variant: "destructive" });
+      toast({ title: "Faltan datos", variant: "destructive" });
       return;
     }
-    
     try {
       const payload = { ...productForm, branch_id: branchId };
-      if (editingItem) {
-        await supabase.from('products').update(payload).eq('id', editingItem.id);
-      } else {
-        await supabase.from('products').insert([payload]);
-      }
+      if (editingItem) await supabase.from('products').update(payload).eq('id', editingItem.id);
+      else await supabase.from('products').insert([payload]);
+      
       toast({ title: "Inventario actualizado" });
-      fetchData();
+      fetchProducts();
       setIsProductDialogOpen(false);
-    } catch (err) { 
-      toast({ title: "Error al guardar", variant: "destructive" }); 
-    }
+    } catch (err) { toast({ title: "Error al guardar", variant: "destructive" }); }
+  };
+
+  const handleSaveCategory = async () => {
+    if (!canEdit || !categoryForm.name) return;
+    try {
+      const payload = { ...categoryForm, branch_id: branchId };
+      if (editingItem) await supabase.from('categories').update(payload).eq('id', editingItem.id);
+      else await supabase.from('categories').insert([payload]);
+      
+      const { data } = await supabase.from('categories').select('*').eq('branch_id', branchId).order('name');
+      setCategories(data || []);
+      setIsCategoryDialogOpen(false);
+    } catch (err) { toast({ title: "Error", variant: "destructive" }); }
   };
 
   const handleDeleteProduct = async (id) => {
-    if (!canEdit || !window.confirm("¿Seguro que deseas eliminar este producto?")) return;
-    try {
-      await supabase.from('products').delete().eq('id', id);
-      toast({ title: "Producto eliminado" });
-      fetchData();
-    } catch (e) {
-      toast({ title: "Error al eliminar", variant: "destructive" });
-    }
+    if (!canEdit || !window.confirm("¿Eliminar producto?")) return;
+    await supabase.from('products').delete().eq('id', id);
+    fetchProducts();
   };
 
   const openProductDialog = (product = null) => {
     if (product) {
       setEditingItem(product);
-      setProductForm({ 
-        name: product.name, 
-        category_id: product.category_id, 
-        cost: product.cost, 
-        price: product.price, 
-        stock: product.stock,
-        barcode: product.barcode || ''
-      });
+      setProductForm({ ...product, barcode: product.barcode || '' });
     } else {
       setEditingItem(null);
       setProductForm({ name: '', category_id: categories[0]?.id || '', cost: 0, price: 0, stock: 0, barcode: '' });
@@ -114,134 +172,149 @@ const InventoryModule = () => {
     setIsProductDialogOpen(true);
   };
 
-  const filteredProducts = products.filter(p => 
-    p.name.toLowerCase().includes(filter.toLowerCase()) ||
-    p.barcode?.toLowerCase().includes(filter.toLowerCase())
-  );
+  const totalPages = Math.ceil(totalCount / itemsPerPage);
 
   return (
-    <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.5 }}>
-      <div className="flex flex-col md:flex-row justify-between items-center mb-8 gap-4">
+    <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }}>
+      <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-8 gap-4">
         <div>
-          <h1 className="text-3xl font-bold text-gray-900 mb-2">Gestión de Stock</h1>
+          <h1 className="text-3xl font-black text-gray-900 tracking-tight">Gestión de Stock</h1>
           {!canEdit && !loading && (
-            <p className="text-amber-600 text-sm font-semibold flex items-center gap-1.5 bg-amber-50 px-3 py-1.5 rounded-lg border border-amber-100">
-              <ShieldCheck className="w-4 h-4"/> Modo Lectura: El propietario ha bloqueado la edición de inventario.
+            <p className="text-amber-600 text-sm font-semibold flex items-center gap-1.5 bg-amber-50 px-3 py-1.5 rounded-lg border border-amber-100 mt-1">
+              <ShieldCheck className="w-4 h-4"/> Modo Lectura Habilitado
             </p>
           )}
         </div>
         
-        {canEdit && (
-          <div className="flex gap-2 w-full md:w-auto">
-            <Button onClick={() => openProductDialog()} className="bg-indigo-600 hover:bg-indigo-700 text-white w-full">
-              <Plus className="w-4 h-4 mr-2" /> Nuevo Producto
-            </Button>
+        <div className="flex bg-gray-100 p-1 rounded-xl w-full md:w-auto">
+          <button onClick={() => setActiveTab('products')} className={`flex-1 md:flex-none px-4 py-2 rounded-lg text-xs font-black transition-all flex items-center justify-center gap-2 ${activeTab === 'products' ? 'bg-white shadow-sm text-indigo-600' : 'text-gray-500'}`}>
+            <Package className="w-4 h-4" /> PRODUCTOS
+          </button>
+          <button onClick={() => setActiveTab('categories')} className={`flex-1 md:flex-none px-4 py-2 rounded-lg text-xs font-black transition-all flex items-center justify-center gap-2 ${activeTab === 'categories' ? 'bg-white shadow-sm text-indigo-600' : 'text-gray-500'}`}>
+            <Layers className="w-4 h-4" /> CATEGORÍAS
+          </button>
+        </div>
+      </div>
+
+      <div className="flex flex-col xl:flex-row gap-4 mb-6">
+        <div className="flex-1 bg-white rounded-2xl border border-gray-200 p-3 flex items-center gap-3 shadow-sm">
+          <Search className="w-5 h-5 text-gray-400" />
+          <input 
+            placeholder={activeTab === 'products' ? "Buscar por nombre o código..." : "Filtrar categorías..."}
+            className="bg-transparent border-none outline-none text-gray-900 w-full font-medium" 
+            value={filter} 
+            onChange={(e) => setFilter(e.target.value)} 
+          />
+        </div>
+
+        {activeTab === 'products' && (
+          <div className="flex flex-wrap gap-2">
+            <div className="flex items-center gap-2 bg-white px-3 py-1 rounded-2xl border border-gray-200 shadow-sm">
+              <Filter className="w-4 h-4 text-gray-400" />
+              <select 
+                className="bg-transparent border-none text-xs font-bold outline-none text-gray-600 cursor-pointer py-2"
+                value={categoryFilter}
+                onChange={(e) => setCategoryFilter(e.target.value)}
+              >
+                <option value="all">Todas las Categorías</option>
+                {categories.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+              </select>
+            </div>
+
+            <div className="flex items-center gap-2 bg-white px-3 py-1 rounded-2xl border border-gray-200 shadow-sm">
+              <select 
+                className="bg-transparent border-none text-xs font-bold outline-none text-gray-600 cursor-pointer py-2"
+                value={stockFilter}
+                onChange={(e) => setStockFilter(e.target.value)}
+              >
+                <option value="all">Todo el Stock</option>
+                <option value="in-stock">Con Stock</option>
+                <option value="no-stock">Sin Stock (0)</option>
+              </select>
+            </div>
           </div>
+        )}
+
+        {canEdit && (
+          <Button onClick={() => activeTab === 'products' ? openProductDialog() : setIsCategoryDialogOpen(true)} className="bg-indigo-600 hover:bg-indigo-700 text-white font-black py-6 rounded-2xl px-8 shadow-lg shadow-indigo-100">
+            <Plus className="w-4 h-4 mr-2" /> NUEVO {activeTab === 'products' ? 'PRODUCTO' : 'CATEGORÍA'}
+          </Button>
         )}
       </div>
 
-      <div className="bg-white rounded-xl border border-gray-200 p-4 mb-6 flex items-center gap-3 shadow-sm">
-        <Search className="w-5 h-5 text-gray-400" />
-        <input 
-          placeholder="Buscar por nombre o código de barras..." 
-          className="bg-transparent border-none outline-none text-gray-900 w-full placeholder:text-gray-400" 
-          value={filter} 
-          onChange={(e) => setFilter(e.target.value)} 
-        />
-      </div>
-
-      <div className="bg-white rounded-xl border border-gray-200 overflow-hidden shadow-sm tabular-nums">
+      <div className="bg-white rounded-2xl border border-gray-200 overflow-hidden shadow-sm tabular-nums">
         <div className="overflow-x-auto">
-          <table className="w-full text-left">
-            <thead className="bg-gray-50 text-gray-500 uppercase text-[10px] font-bold tracking-widest">
+          <table className="w-full text-left text-sm">
+            <thead className="bg-gray-50/50 text-gray-500 uppercase text-[10px] font-black tracking-widest border-b">
               <tr>
-                <th className="px-6 py-4">Producto</th>
-                <th className="px-6 py-4">Código / SKU</th>
-                <th className="px-6 py-4">Costo</th>
-                <th className="px-6 py-4 text-indigo-600">Precio</th>
-                <th className="px-6 py-4">Stock</th>
+                <th className="px-6 py-4">Nombre</th>
+                {activeTab === 'products' && (
+                  <><th className="px-6 py-4 text-center">Código</th><th className="px-6 py-4">Precio</th><th className="px-6 py-4 text-center">Stock</th></>
+                )}
                 <th className="px-6 py-4 text-right">Acciones</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100">
               {loading ? (
                 <tr><td colSpan="6" className="p-20 text-center"><Loader2 className="animate-spin mx-auto text-indigo-600 w-8 h-8" /></td></tr>
-              ) : filteredProducts.length === 0 ? (
-                <tr><td colSpan="6" className="p-10 text-center text-gray-400">Sin productos registrados.</td></tr>
-              ) : filteredProducts.map((product) => (
-                <tr key={product.id} className="hover:bg-gray-50/50 transition-colors">
-                  <td className="px-6 py-4 font-bold text-gray-900">{product.name}</td>
-                  <td className="px-6 py-4">
-                    {product.barcode ? (
-                      <div className="flex items-center gap-1.5 text-gray-500">
-                        <Barcode className="w-3 h-3" />
-                        <span className="text-xs font-mono">{product.barcode}</span>
-                      </div>
-                    ) : <span className="text-[10px] text-gray-300 italic">Sin código</span>}
-                  </td>
-                  <td className="px-6 py-4 text-gray-500">{formatCurrency(product.cost)}</td>
-                  <td className="px-6 py-4 text-indigo-600 font-extrabold">{formatCurrency(product.price)}</td>
-                  <td className="px-6 py-4">
-                    <span className={`px-2 py-1 rounded-md text-[10px] font-black uppercase ${product.stock < 10 ? 'bg-red-50 text-red-600' : 'bg-green-50 text-green-600'}`}>
-                      {product.stock} Unidades
-                    </span>
-                  </td>
+              ) : (activeTab === 'products' ? products : filteredCategories).map((item) => (
+                <tr key={item.id} className="hover:bg-gray-50/50 transition-colors">
+                  <td className="px-6 py-4 font-bold text-gray-900">{item.name}</td>
+                  {activeTab === 'products' && (
+                    <>
+                      <td className="px-6 py-4 text-center">{item.barcode ? <span className="bg-gray-100 px-2 py-1 rounded-md font-mono text-[10px] font-bold text-gray-600 border border-gray-200">{item.barcode}</span> : '-'}</td>
+                      <td className="px-6 py-4 font-black text-indigo-600">{formatCurrency(item.price)}</td>
+                      <td className="px-6 py-4 text-center"><span className={`px-2 py-1 rounded text-[10px] font-black ${item.stock <= 5 ? 'bg-red-50 text-red-600' : 'bg-green-50 text-green-600'}`}>{item.stock} U.</span></td>
+                    </>
+                  )}
                   <td className="px-6 py-4 text-right">
                     {canEdit ? (
                       <div className="flex justify-end gap-1">
-                        <Button onClick={() => openProductDialog(product)} size="icon" variant="ghost" className="h-8 w-8 text-gray-400 hover:text-indigo-600 hover:bg-indigo-50"><Edit className="w-4 h-4" /></Button>
-                        <Button onClick={() => handleDeleteProduct(product.id)} size="icon" variant="ghost" className="h-8 w-8 text-gray-400 hover:text-red-600 hover:bg-red-50"><Trash2 className="w-4 h-4" /></Button>
+                        <Button onClick={() => activeTab === 'products' ? openProductDialog(item) : setIsCategoryDialogOpen(true)} size="icon" variant="ghost" className="hover:text-indigo-600"><Edit className="w-4 h-4" /></Button>
+                        <Button onClick={() => activeTab === 'products' ? handleDeleteProduct(item.id) : null} size="icon" variant="ghost" className="hover:text-red-600"><Trash2 className="w-4 h-4" /></Button>
                       </div>
-                    ) : (
-                      <span className="text-[10px] text-gray-300 font-bold uppercase tracking-tighter italic select-none">Bloqueado</span>
-                    )}
+                    ) : <span className="text-[10px] text-gray-300 font-bold uppercase italic">Bloqueado</span>}
                   </td>
                 </tr>
               ))}
             </tbody>
           </table>
+          
+          {/* ✅ PAGINACIÓN OPTIMIZADA */}
+          {!loading && activeTab === 'products' && totalPages > 1 && (
+            <div className="p-4 border-t border-gray-100 flex justify-between items-center bg-gray-50/30">
+              <p className="text-xs font-bold text-gray-500 uppercase tracking-tighter">Total: {totalCount} productos</p>
+              <div className="flex items-center gap-2">
+                <Button variant="outline" size="sm" onClick={() => setCurrentPage(prev => Math.max(1, prev - 1))} disabled={currentPage === 1} className="rounded-xl h-9 w-9 p-0"><ChevronLeft className="w-4 h-4" /></Button>
+                <span className="text-xs font-black text-indigo-600 bg-indigo-50 px-3 py-2 rounded-xl border">PÁGINA {currentPage} DE {totalPages}</span>
+                <Button variant="outline" size="sm" onClick={() => setCurrentPage(prev => Math.min(totalPages, prev + 1))} disabled={currentPage === totalPages} className="rounded-xl h-9 w-9 p-0"><ChevronRight className="w-4 h-4" /></Button>
+              </div>
+            </div>
+          )}
         </div>
       </div>
 
-      {/* Formulario Modal de Producto */}
+      {/* Modales */}
       <Dialog open={isProductDialogOpen} onOpenChange={setIsProductDialogOpen}>
-        <DialogContent className="bg-white sm:max-w-md">
-          <DialogHeader><DialogTitle className="text-xl font-bold">{editingItem ? 'Editar' : 'Nuevo'} Producto</DialogTitle></DialogHeader>
+        <DialogContent className="bg-white sm:max-w-md rounded-2xl">
+          <DialogHeader><DialogTitle className="text-xl font-black">Gestionar Producto</DialogTitle></DialogHeader>
           <div className="grid gap-4 py-4">
-            <div className="grid gap-2">
-              <label className="text-xs font-bold uppercase text-gray-500">Código de Barras (Opcional)</label>
-              <Input 
-                value={productForm.barcode} 
-                onChange={e => setProductForm({...productForm, barcode: e.target.value})} 
-                placeholder="Escanea o escribe el código"
-                className="bg-gray-50 border-indigo-100 focus:ring-indigo-500"
-              />
-            </div>
-            <div className="grid gap-2">
-              <label className="text-xs font-bold uppercase text-gray-500">Nombre del Producto</label>
-              <Input value={productForm.name} onChange={e => setProductForm({...productForm, name: e.target.value})} placeholder="Ej: Tablet Samsung Galaxy" />
-            </div>
+            <div className="grid gap-2"><label className="text-xs font-bold uppercase text-gray-500">Código</label><Input value={productForm.barcode} onChange={e => setProductForm({...productForm, barcode: e.target.value})} placeholder="Opcional" className="rounded-xl" /></div>
+            <div className="grid gap-2"><label className="text-xs font-bold uppercase text-gray-500">Nombre</label><Input value={productForm.name} onChange={e => setProductForm({...productForm, name: e.target.value})} className="rounded-xl" /></div>
             <div className="grid gap-2">
               <label className="text-xs font-bold uppercase text-gray-500">Categoría</label>
-              <select 
-                className="w-full p-2.5 text-sm border border-gray-200 rounded-xl bg-gray-50 outline-none focus:ring-2 focus:ring-indigo-500"
-                value={productForm.category_id}
-                onChange={e => setProductForm({...productForm, category_id: e.target.value})}
-              >
+              <select className="w-full p-2.5 text-sm border border-gray-200 rounded-xl bg-gray-50 outline-none focus:ring-2 focus:ring-indigo-500" value={productForm.category_id} onChange={e => setProductForm({...productForm, category_id: e.target.value})}>
                 <option value="">Seleccionar...</option>
                 {categories.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
               </select>
             </div>
             <div className="grid grid-cols-3 gap-3">
-              <div className="space-y-1.5"><label className="text-[10px] font-bold text-gray-400 uppercase">Costo</label><Input type="number" value={productForm.cost} onChange={e => setProductForm({...productForm, cost: Number(e.target.value)})} /></div>
-              <div className="space-y-1.5"><label className="text-[10px] font-bold text-indigo-400 uppercase">Venta</label><Input type="number" value={productForm.price} onChange={e => setProductForm({...productForm, price: Number(e.target.value)})} className="border-indigo-100 bg-indigo-50/30 font-bold text-indigo-700" /></div>
-              <div className="space-y-1.5"><label className="text-[10px] font-bold text-gray-400 uppercase">Stock</label><Input type="number" value={productForm.stock} onChange={e => setProductForm({...productForm, stock: Number(e.target.value)})} /></div>
+              <div className="space-y-1.5"><label className="text-[10px] font-bold text-gray-400 uppercase">Costo</label><Input type="number" value={productForm.cost} onFocus={e => e.target.select()} onChange={e => setProductForm({...productForm, cost: Number(e.target.value)})} /></div>
+              <div className="space-y-1.5"><label className="text-[10px] font-bold text-indigo-400 uppercase">Venta</label><Input type="number" value={productForm.price} onFocus={e => e.target.select()} onChange={e => setProductForm({...productForm, price: Number(e.target.value)})} className="border-indigo-100 bg-indigo-50/30 font-bold text-indigo-700" /></div>
+              <div className="space-y-1.5"><label className="text-[10px] font-bold text-gray-400 uppercase">Stock</label><Input type="number" value={productForm.stock} onFocus={e => e.target.select()} onChange={e => setProductForm({...productForm, stock: Number(e.target.value)})} /></div>
             </div>
           </div>
-          <DialogFooter className="gap-2 sm:gap-0">
-            <Button variant="outline" onClick={() => setIsProductDialogOpen(false)} className="w-full sm:w-auto">Cancelar</Button>
-            <Button onClick={handleSaveProduct} className="bg-indigo-600 hover:bg-indigo-700 text-white w-full sm:w-auto">Guardar cambios</Button>
-          </DialogFooter>
+          <DialogFooter><Button onClick={handleSaveProduct} className="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-black py-6 rounded-xl uppercase text-xs">Guardar Cambios</Button></DialogFooter>
         </DialogContent>
       </Dialog>
     </motion.div>

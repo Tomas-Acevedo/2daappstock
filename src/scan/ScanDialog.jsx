@@ -1,290 +1,237 @@
+// src/scan/ScanDialog.jsx
 import React, { useEffect, useMemo, useState } from "react";
 import { useScan } from "./ScanProvider";
-import { supabase } from "@/lib/supabase";
-
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DialogFooter,
-} from "@/components/ui/dialog";
-
+import { supabase } from "@/lib/customSupabaseClient";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { toast } from "@/components/ui/use-toast";
+import { Search, Plus, Minus, Package, Loader2, CheckCircle2, Barcode, ShoppingCart, Trash2, Banknote, AlertTriangle } from 'lucide-react';
+import { formatCurrency } from '@/lib/utils';
+import { useAuth } from "@/contexts/AuthContext";
 
-// ✅ mismo método de branchId por URL (sin Router context)
 const getBranchIdFromPath = () => {
   try {
     const path = window.location.pathname || "";
     const m = path.match(/\/branch\/([^/]+)/i);
     return m?.[1] || null;
-  } catch {
-    return null;
-  }
+  } catch { return null; }
 };
 
 export default function ScanDialog() {
-  const { isOpen, close, barcode, loading, error, matches, setSelected, openWithCode } =
-    useScan();
-
+  const { user } = useAuth();
+  const { 
+    isOpen, close, barcode, loading, matches, openWithCode, 
+    updateProductFields, cart, addToCart, removeFromCart, clearCart, updateCartQty 
+  } = useScan();
   const branchId = getBranchIdFromPath();
 
+  const [activeTab, setActiveTab] = useState("sale"); 
   const [viewProduct, setViewProduct] = useState(null);
-
-  // UI "no encontrado"
   const [search, setSearch] = useState("");
   const [products, setProducts] = useState([]);
-  const [loadingProducts, setLoadingProducts] = useState(false);
+  const [categories, setCategories] = useState([]);
+  const [paymentMethods, setPaymentMethods] = useState([]);
+  const [selectedPaymentMethod, setSelectedPaymentMethod] = useState(null);
+  const [loadingData, setLoadingData] = useState(false);
+  const [isProcessing, setIsProcessing] = useState(false);
 
-  // crear nuevo
+  const [editPrice, setEditPrice] = useState(0);
+  const [editStock, setEditStock] = useState(0);
+  const [saleQty, setSaleQty] = useState(1);
+  const [amountReceived, setAmountReceived] = useState(0);
+
   const [newName, setNewName] = useState("");
-  const [newPrice, setNewPrice] = useState("");
-  const [newStock, setNewStock] = useState("0");
+  const [newPrice, setNewPrice] = useState(0);
+  const [newStock, setNewStock] = useState(0);
+  const [newCategoryId, setNewCategoryId] = useState("");
 
-  const noMatches = !loading && !error && (matches?.length || 0) === 0;
+  const filteredProducts = useMemo(() => {
+    const s = (search || "").toLowerCase();
+    return products.filter(p => p.name?.toLowerCase().includes(s) || p.barcode?.includes(s));
+  }, [products, search]);
 
   useEffect(() => {
     if (!isOpen) return;
     if (matches?.length === 1) {
-      setViewProduct(matches[0]);
-      setSelected(matches[0]);
+      const p = matches[0];
+      setViewProduct(p);
+      setEditPrice(p.price);
+      setEditStock(p.stock);
+      setSaleQty(1);
+      setAmountReceived(0);
+      setActiveTab("sale");
     } else {
       setViewProduct(null);
     }
-  }, [isOpen, matches, setSelected]);
-
-  const handleClose = () => {
-    close();
-    setViewProduct(null);
-    setSearch("");
-    setProducts([]);
-    setNewName("");
-    setNewPrice("");
-    setNewStock("0");
-  };
-
-  const fetchProducts = async () => {
-    if (!branchId) return;
-    setLoadingProducts(true);
-    try {
-      const { data, error } = await supabase
-        .from("products")
-        .select("id,name,price,stock,barcode,branch_id")
-        .eq("branch_id", branchId)
-        .order("name", { ascending: true });
-
-      if (error) throw error;
-      setProducts(data || []);
-    } catch (e) {
-      console.error(e);
-      toast({ title: "No se pudieron cargar productos", variant: "destructive" });
-    } finally {
-      setLoadingProducts(false);
-    }
-  };
+  }, [isOpen, matches]);
 
   useEffect(() => {
-    if (!isOpen) return;
-    if (noMatches) fetchProducts();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isOpen, noMatches]);
+    if (isOpen && branchId) fetchInitialData();
+  }, [isOpen, branchId]);
 
-  const filteredProducts = useMemo(() => {
-    const s = (search || "").trim().toLowerCase();
-    if (!s) return products;
-    return products.filter(
-      (p) =>
-        p.name?.toLowerCase().includes(s) ||
-        (p.barcode || "").toLowerCase().includes(s)
-    );
-  }, [products, search]);
-
-  const associateBarcode = async (product) => {
-    if (!branchId || !barcode) return;
+  const fetchInitialData = async () => {
+    setLoadingData(true);
     try {
-      const { data, error } = await supabase
-        .from("products")
-        .update({ barcode })
-        .eq("id", product.id)
-        .eq("branch_id", branchId)
-        .select("id,name,price,stock,barcode,branch_id")
-        .single();
+      const [prodsRes, catsRes, payRes] = await Promise.all([
+        supabase.from("products").select("*").eq("branch_id", branchId).order("name"),
+        supabase.from("categories").select("*").eq("branch_id", branchId).order("name"),
+        supabase.from('payment_methods').select('*').eq('branch_id', branchId).eq('is_active', true).order('name', { ascending: true })
+      ]);
+      setProducts(prodsRes.data || []);
+      setCategories(catsRes.data || []);
+      setPaymentMethods(payRes.data || []);
+      if (payRes.data?.length > 0) setSelectedPaymentMethod(payRes.data[0]);
+    } finally { setLoadingData(false); }
+  };
 
-      if (error) throw error;
+  const handleClose = () => { close(); setSaleQty(1); setAmountReceived(0); setActiveTab("sale"); setViewProduct(null); };
 
-      toast({
-        title: "Código asociado",
-        description: `Se vinculó ${barcode} a "${data.name}"`,
-      });
+  // Totales dinámicos
+  const subtotal = useMemo(() => cart.reduce((acc, it) => acc + (it.price * it.quantity), 0), [cart]);
+  const discountPercent = selectedPaymentMethod ? Number(selectedPaymentMethod.discount_percentage || 0) : 0;
+  const discountAmount = (subtotal * discountPercent) / 100;
+  const cartTotal = subtotal - discountAmount;
+  const changeAmount = useMemo(() => (amountReceived > 0 ? Math.max(0, amountReceived - cartTotal) : 0), [amountReceived, cartTotal]);
 
-      openWithCode(barcode);
-    } catch (e) {
-      console.error(e);
-      toast({ title: "No se pudo asociar el código", variant: "destructive" });
-    }
+  const handleFinalizeSale = async () => {
+    if (cart.length === 0 || !selectedPaymentMethod) return;
+    setIsProcessing(true);
+    try {
+      for (const item of cart) {
+        const { data: currentProd } = await supabase.from('products').select('stock, name').eq('id', item.id).single();
+        if (!currentProd || currentProd.stock < item.quantity) {
+          toast({ title: "Stock insuficiente", description: `Producto: ${currentProd?.name}`, variant: "destructive" });
+          setIsProcessing(false); return;
+        }
+      }
+
+      const { data: sale, error: saleError } = await supabase.from('sales').insert([{
+        branch_id: branchId, customer_name: 'Cliente General', total: cartTotal, payment_method: selectedPaymentMethod.name, receipt_generated: false
+      }]).select().single();
+
+      if (saleError) throw saleError;
+
+      const saleItems = cart.map(item => ({
+        sale_id: sale.id, product_id: item.id, product_name: item.name, quantity: item.quantity, unit_price: item.price, is_custom: false
+      }));
+
+      await supabase.from('sale_items').insert(saleItems);
+
+      for (const item of cart) {
+        const { data: p } = await supabase.from('products').select('stock').eq('id', item.id).single();
+        await supabase.from('products').update({ stock: p.stock - item.quantity }).eq('id', item.id);
+      }
+
+      toast({ title: "¡Venta completada!" });
+      window.dispatchEvent(new Event('inventory:refresh'));
+      clearCart();
+      handleClose();
+    } catch (e) { toast({ title: "Error", variant: "destructive" }); } 
+    finally { setIsProcessing(false); }
   };
 
   const createProductWithBarcode = async () => {
-    if (!branchId || !barcode) return;
+    if (!newName || !newCategoryId) return;
+    const { error } = await supabase.from("products").insert([{ name: newName, price: newPrice, stock: newStock, barcode, branch_id: branchId, category_id: newCategoryId }]);
+    if (!error) { window.dispatchEvent(new Event('inventory:refresh')); openWithCode(barcode); }
+  };
 
-    const name = newName.trim();
-    const price = Number(String(newPrice || "0").replace(/[^\d]/g, ""));
-    const stock = Number(String(newStock || "0").replace(/[^\d]/g, ""));
-
-    if (!name) {
-      toast({ title: "Poné un nombre", variant: "destructive" });
-      return;
-    }
-
-    try {
-      const { data, error } = await supabase
-        .from("products")
-        .insert([
-          {
-            name,
-            price: Number.isFinite(price) ? price : 0,
-            stock: Number.isFinite(stock) ? stock : 0,
-            barcode,
-            branch_id: branchId,
-          },
-        ])
-        .select("id,name,price,stock,barcode,branch_id")
-        .single();
-
-      if (error) throw error;
-
-      toast({
-        title: "Producto creado",
-        description: `"${data.name}" vinculado a ${barcode}`,
-      });
-
-      openWithCode(barcode);
-    } catch (e) {
-      console.error(e);
-      toast({ title: "No se pudo crear el producto", variant: "destructive" });
-    }
+  const associateBarcode = async (p) => {
+    const { error } = await supabase.from("products").update({ barcode }).eq("id", p.id);
+    if (!error) openWithCode(barcode); 
   };
 
   return (
-    <Dialog open={isOpen} onOpenChange={(o) => (o ? null : handleClose())}>
-      <DialogContent className="sm:max-w-3xl">
-        <DialogHeader>
-          <DialogTitle>
-            Escaneo: <span className="font-mono">{barcode || "—"}</span>
-          </DialogTitle>
-        </DialogHeader>
-
-        {!branchId && (
-          <div className="text-sm text-red-600">
-            No se detectó <b>branchId</b>. Abrí el escaneo dentro de una ruta tipo{" "}
-            <span className="font-mono">/branch/:branchId/...</span>
-          </div>
-        )}
-
-        {loading && <div className="text-sm text-gray-500">Buscando producto…</div>}
-        {error && <div className="text-sm text-red-600">{String(error)}</div>}
-
-        {/* ✅ Encontrado 1 */}
-        {!loading && !error && viewProduct && (
-          <div className="space-y-3">
-            <div className="rounded-xl border p-4">
-              <div className="text-xl font-bold">{viewProduct.name}</div>
-              <div className="text-sm text-gray-500">
-                Precio:{" "}
-                <b>${Number(viewProduct.price || 0).toLocaleString("es-AR")}</b>
-                {" · "}
-                Stock: <b>{viewProduct.stock ?? 0}</b>
-              </div>
-              <div className="text-xs text-gray-400 mt-1">
-                Barcode: {viewProduct.barcode || "—"}
-              </div>
+    <Dialog open={isOpen} onOpenChange={(o) => !o && handleClose()}>
+      <DialogContent className="max-w-5xl bg-white p-0 overflow-hidden shadow-2xl border-none">
+        <DialogHeader className="hidden"><DialogTitle>Escaneo</DialogTitle></DialogHeader>
+        
+        <div className="p-6 border-b border-gray-100 flex justify-between items-center bg-gray-50/50">
+          <div className="flex items-center gap-4">
+            <div className="p-2.5 bg-indigo-600 rounded-xl shadow-md"><Barcode className="w-6 h-6 text-white" /></div>
+            <div>
+              <h2 className="text-xs font-bold text-indigo-600 uppercase tracking-widest mb-0.5">Torre de Control</h2>
+              <p className="text-2xl font-black text-gray-900 tracking-tight">ESCANEADO: <span className="text-indigo-600 font-mono">{barcode}</span></p>
             </div>
           </div>
-        )}
+          {cart.length > 0 && <div className="flex items-center gap-2 bg-amber-50 px-4 py-2 rounded-xl border border-amber-100 mr-10"><ShoppingCart className="w-4 h-4 text-amber-600" /><span className="font-black text-amber-600 uppercase text-[10px]">{cart.length} productos</span></div>}
+        </div>
 
-        {/* ❌ No encontrado */}
-        {branchId && noMatches && (
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div className="rounded-xl border p-4">
-              <div className="font-bold mb-2">Asociar a producto existente</div>
-              <Input
-                placeholder="Buscar por nombre…"
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-              />
-
-              <div className="mt-3 max-h-[320px] overflow-auto space-y-2">
-                {loadingProducts ? (
-                  <div className="text-sm text-gray-500">Cargando productos…</div>
-                ) : filteredProducts.length === 0 ? (
-                  <div className="text-sm text-gray-500">Sin resultados</div>
-                ) : (
-                  filteredProducts.slice(0, 50).map((p) => (
-                    <button
-                      key={p.id}
-                      onClick={() => associateBarcode(p)}
-                      className="w-full text-left rounded-lg border p-2 hover:bg-gray-50"
-                    >
-                      <div className="font-semibold">{p.name}</div>
-                      <div className="text-xs text-gray-500">
-                        Stock: {p.stock ?? 0} · $
-                        {Number(p.price || 0).toLocaleString("es-AR")}
-                        {p.barcode ? ` · Código actual: ${p.barcode}` : ""}
-                      </div>
-                    </button>
-                  ))
-                )}
+        <div className="p-8 min-h-[500px] bg-white">
+          {loading || loadingData ? (
+            <div className="h-64 flex flex-col items-center justify-center gap-4"><Loader2 className="w-12 h-12 animate-spin text-indigo-600" /></div>
+          ) : viewProduct ? (
+            <div className="space-y-6">
+              <div className="flex justify-center gap-2 mb-4 bg-gray-100 p-1 rounded-2xl w-fit mx-auto">
+                <button onClick={() => setActiveTab("sale")} className={`px-6 py-2 rounded-xl text-xs font-black transition-all ${activeTab === "sale" ? "bg-white text-indigo-600 shadow-sm" : "text-gray-500"}`}>VENDER</button>
+                <button onClick={() => setActiveTab("edit")} className={`px-6 py-2 rounded-xl text-xs font-black transition-all ${activeTab === "edit" ? "bg-white text-indigo-600 shadow-sm" : "text-gray-500"}`}>EDITAR INFO</button>
+                <button onClick={() => setActiveTab("cart")} className={`px-6 py-2 rounded-xl text-xs font-black transition-all ${activeTab === "cart" ? "bg-white text-indigo-600 shadow-sm" : "text-gray-500"}`}>CARRITO ({cart.length})</button>
               </div>
+
+              {activeTab === "sale" && (
+                <div className="text-center max-w-xl mx-auto space-y-6 animate-in zoom-in-95 duration-200">
+                  <h3 className="text-4xl font-black text-gray-900 tracking-tight">{viewProduct.name}</h3>
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className={`p-4 rounded-2xl border ${viewProduct.stock <= 0 ? 'bg-red-50 border-red-100' : 'bg-gray-50 border-gray-100'}`}><p className="text-[10px] font-black text-gray-400 uppercase">Stock</p><p className={`text-xl font-bold ${viewProduct.stock <= 0 ? 'text-red-600' : 'text-gray-900'}`}>{viewProduct.stock} U.</p></div>
+                    <div className="bg-indigo-50 p-4 rounded-2xl border border-indigo-100"><p className="text-[10px] font-black text-indigo-400 uppercase">Precio</p><p className="text-xl font-bold text-indigo-600">{formatCurrency(viewProduct.price)}</p></div>
+                  </div>
+                  {viewProduct.stock > 0 ? (
+                    <><div className="space-y-2"><label className="text-[10px] font-black text-gray-400 uppercase tracking-widest">Cantidad</label><Input type="number" className="text-4xl h-20 text-center font-black rounded-3xl" value={saleQty} onChange={e => setSaleQty(Number(e.target.value))} onFocus={e => e.target.select()} /></div><Button onClick={() => { if(saleQty > viewProduct.stock) { toast({title:"Sin stock", variant:"destructive"}); return; } addToCart(viewProduct, saleQty); setActiveTab("cart"); }} className="w-full py-8 rounded-3xl bg-indigo-600 text-lg font-black shadow-xl">AÑADIR AL CARRITO</Button></>
+                  ) : <div className="text-red-600 bg-red-50 p-4 rounded-2xl font-bold border border-red-100">Sin stock disponible.</div>}
+                </div>
+              )}
+
+              {activeTab === "edit" && (
+                <div className="max-w-2xl mx-auto grid grid-cols-2 gap-6">
+                  <div className="bg-white p-6 rounded-3xl border border-gray-100 shadow-sm space-y-2"><p className="text-[10px] font-black text-gray-400 uppercase">Stock Físico</p><Input type="number" className="text-3xl font-bold h-16 text-center" value={editStock} onFocus={e => e.target.select()} onChange={e => setEditStock(Number(e.target.value))} /></div>
+                  <div className="bg-white p-6 rounded-3xl border border-gray-100 shadow-sm space-y-2"><p className="text-[10px] font-black text-indigo-400 uppercase">Precio Venta</p><Input type="number" className="text-3xl font-bold h-16 text-center text-indigo-600" value={editPrice} onFocus={e => e.target.select()} onChange={e => setEditPrice(Number(e.target.value))} /></div>
+                  <Button onClick={async () => { await updateProductFields(viewProduct.id, { price: editPrice, stock: editStock }); toast({ title: "Guardado" }); window.dispatchEvent(new Event('inventory:refresh')); }} className="col-span-2 py-7 bg-emerald-600 text-white font-black rounded-3xl">GUARDAR CAMBIOS</Button>
+                </div>
+              )}
+
+              {activeTab === "cart" && (
+                <div className="max-w-3xl mx-auto space-y-6 animate-in fade-in duration-300">
+                  <div className="border rounded-2xl overflow-hidden shadow-sm">
+                    <table className="w-full text-sm">
+                      <thead className="bg-gray-50 font-black text-[10px] uppercase text-gray-400">
+                        <tr><th className="p-4 text-left">Producto</th><th className="p-4 text-center">Cant.</th><th className="p-4 text-right">Subtotal</th><th className="p-4"></th></tr>
+                      </thead>
+                      <tbody className="divide-y divide-gray-100">
+                        {cart.map(item => (
+                          <tr key={item.id}>
+                            <td className="p-4 font-bold">{item.name}</td>
+                            <td className="p-4">
+                              <div className="flex items-center justify-center gap-2 bg-gray-100 rounded-lg p-1 w-fit mx-auto">
+                                <button onClick={() => updateCartQty(item.id, item.quantity - 1)} className="p-1.5 hover:bg-white rounded transition-all" disabled={item.quantity <= 1}><Minus className="w-3 h-3 text-gray-500"/></button>
+                                <span className="font-black text-sm w-6 text-center">{item.quantity}</span>
+                                <button onClick={() => { if(item.quantity >= item.stock) { toast({title:"Stock máximo", variant:"destructive"}); return; } updateCartQty(item.id, item.quantity + 1); }} className="p-1.5 hover:bg-white rounded transition-all"><Plus className="w-3 h-3 text-gray-500"/></button>
+                              </div>
+                            </td>
+                            <td className="p-4 text-right font-black">{formatCurrency(item.price * item.quantity)}</td>
+                            <td className="p-4 text-right"><Button variant="ghost" size="icon" onClick={() => removeFromCart(item.id)}><Trash2 className="w-4 h-4 text-red-400"/></Button></td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                  <div className="space-y-4 bg-gray-50 p-6 rounded-[32px] border border-gray-100">
+                    <div className="grid grid-cols-2 gap-4">
+                      <div className="space-y-2"><label className="text-[10px] font-black uppercase text-gray-400">Pago</label><div className="grid grid-cols-1 gap-2">{paymentMethods.map(method => (<Button key={method.id} variant={selectedPaymentMethod?.id === method.id ? "default" : "outline"} onClick={() => setSelectedPaymentMethod(method)} className={`h-auto py-3 px-4 flex justify-between items-center rounded-xl border-2 transition-all ${selectedPaymentMethod?.id === method.id ? 'bg-indigo-600 border-indigo-600 text-white' : 'bg-white border-gray-100'}`}><span className="font-bold text-xs">{method.name}</span>{method.discount_percentage > 0 && <span className={`text-[9px] px-1.5 py-0.5 rounded-full font-black ${selectedPaymentMethod?.id === method.id ? 'bg-white text-indigo-600' : 'bg-green-100 text-green-600'}`}>-{method.discount_percentage}%</span>}</Button>))}</div></div>
+                      <div className="space-y-2"><label className="text-[10px] font-black uppercase text-gray-400">Calculadora</label><div className="bg-white p-4 rounded-xl border border-gray-200 space-y-3"><div className="relative"><Banknote className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" /><Input type="number" placeholder="Paga con..." className="pl-9 bg-gray-50 border-none font-bold" value={amountReceived || ''} onFocus={e => e.target.select()} onChange={e => setAmountReceived(Number(e.target.value))} /></div>{amountReceived > 0 && <div className="flex justify-between items-center pt-2 border-t border-dashed"><span className="text-[10px] font-black text-gray-400 uppercase">Vuelto:</span><span className="text-lg font-black text-green-600">{formatCurrency(changeAmount)}</span></div>}</div></div>
+                    </div>
+                    <div className="pt-4 border-t border-gray-200 flex justify-between items-end px-2"><div><p className="text-[10px] font-black uppercase text-gray-400">Total Venta</p><p className="text-5xl font-black text-indigo-700">{formatCurrency(cartTotal)}</p></div><Button onClick={handleFinalizeSale} disabled={isProcessing || cart.length === 0} className="px-10 py-9 rounded-2xl bg-emerald-600 text-lg font-black shadow-lg">FINALIZAR</Button></div>
+                  </div>
+                </div>
+              )}
             </div>
-
-            <div className="rounded-xl border p-4">
-              <div className="font-bold mb-2">Crear producto nuevo</div>
-
-              <div className="space-y-2">
-                <div>
-                  <div className="text-xs text-gray-500 mb-1">Nombre</div>
-                  <Input value={newName} onChange={(e) => setNewName(e.target.value)} />
-                </div>
-
-                <div>
-                  <div className="text-xs text-gray-500 mb-1">Precio</div>
-                  <Input
-                    inputMode="numeric"
-                    value={newPrice}
-                    onChange={(e) => setNewPrice(e.target.value)}
-                    placeholder="0"
-                  />
-                </div>
-
-                <div>
-                  <div className="text-xs text-gray-500 mb-1">Stock</div>
-                  <Input
-                    inputMode="numeric"
-                    value={newStock}
-                    onChange={(e) => setNewStock(e.target.value)}
-                    placeholder="0"
-                  />
-                </div>
-
-                <div className="text-xs text-gray-500">
-                  Código a vincular: <span className="font-mono">{barcode}</span>
-                </div>
-
-                <Button onClick={createProductWithBarcode} className="w-full">
-                  Crear y vincular
-                </Button>
-              </div>
+          ) : (
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+              <div className="bg-gray-50/50 p-6 rounded-[24px] border border-gray-100 flex flex-col h-[520px]"><div className="flex items-center gap-3 mb-6"><Package className="text-emerald-600 w-5 h-5" /><h3 className="text-lg font-bold">Vincular</h3></div><Input className="bg-white mb-4 shadow-sm" placeholder="Buscar..." value={search} onChange={e => setSearch(e.target.value)} /><div className="flex-1 overflow-y-auto space-y-2 pr-2 custom-scrollbar">{filteredProducts.map(p => (<div key={p.id} className="flex items-center justify-between p-4 bg-white rounded-2xl border border-gray-100 hover:border-indigo-200 transition-all shadow-sm"><p className="font-bold text-sm text-gray-800 truncate">{p.name}</p><Button size="sm" className="bg-indigo-50 hover:bg-indigo-600 text-indigo-600 hover:text-white text-[10px] font-black" onClick={() => associateBarcode(p)}>VINCULAR</Button></div>))}</div></div>
+              <div className="bg-gray-50/50 p-6 rounded-[24px] border border-gray-100 space-y-5"><div className="flex items-center gap-3 mb-6"><Plus className="text-blue-600 w-5 h-5" /><h3 className="text-lg font-bold">Nuevo Producto</h3></div><div className="space-y-1.5"><label className="text-[10px] font-black text-gray-400 uppercase">Nombre</label><Input className="bg-white rounded-xl" value={newName} onChange={e => setNewName(e.target.value)} /></div><div className="grid grid-cols-2 gap-4"><div><label className="text-[10px] font-black text-gray-400 uppercase">Precio</label><Input type="number" className="bg-white rounded-xl" value={newPrice} onFocus={e => e.target.select()} onChange={e => setNewPrice(Number(e.target.value))} /></div><div><label className="text-[10px] font-black text-gray-400 uppercase">Stock</label><Input type="number" className="bg-white rounded-xl" value={newStock} onFocus={e => e.target.select()} onChange={e => setNewStock(Number(e.target.value))} /></div></div><div className="space-y-1.5"><label className="text-[10px] font-black text-gray-400 uppercase">Categoría</label><select className="w-full h-12 px-4 bg-white border border-gray-200 rounded-xl text-sm outline-none" value={newCategoryId} onChange={e => setNewCategoryId(e.target.value)}><option value="">Elegir...</option>{categories.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}</select></div><Button onClick={createProductWithBarcode} className="w-full bg-indigo-600 text-white py-8 text-lg font-black rounded-2xl shadow-lg">CREAR Y VINCULAR</Button></div>
             </div>
-          </div>
-        )}
-
-        <DialogFooter className="gap-2">
-          <Button variant="outline" onClick={handleClose}>
-            Cerrar
-          </Button>
-        </DialogFooter>
+          )}
+        </div>
       </DialogContent>
     </Dialog>
   );

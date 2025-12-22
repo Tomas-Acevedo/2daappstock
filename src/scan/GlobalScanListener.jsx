@@ -1,19 +1,35 @@
+// src/scan/GlobalScanListener.jsx
 import { useEffect, useRef } from "react";
 import { useScan } from "./ScanProvider";
 
-export default function GlobalScanListener() {
-  const { openWithCode } = useScan(); // ✅
+// Función auxiliar para detectar si estamos dentro de una sucursal
+const getBranchIdFromPath = () => {
+  try {
+    const path = window.location.pathname || "";
+    // Busca el patrón /branch/ seguido del ID
+    const m = path.match(/\/branch\/([^/]+)/i);
+    return m?.[1] || null;
+  } catch {
+    return null;
+  }
+};
 
+export default function GlobalScanListener() {
+  const { openWithCode } = useScan();
   const bufferRef = useRef([]);
   const timesRef = useRef([]);
   const lastTsRef = useRef(0);
 
   useEffect(() => {
     const onKeyDown = (e) => {
-      const key = e.key;
+      // ✅ RESTRICCIÓN: Solo funciona si hay un branchId en la URL
+      const currentBranchId = getBranchIdFromPath();
+      if (!currentBranchId) return;
 
+      const key = e.key;
       const now = performance.now();
-      if (now - lastTsRef.current > 300) {
+
+      if (now - lastTsRef.current > 200) {
         bufferRef.current = [];
         timesRef.current = [];
       }
@@ -32,21 +48,16 @@ export default function GlobalScanListener() {
         bufferRef.current = [];
         timesRef.current = [];
 
-        if (!chars) return;
-
-        const MIN_LEN = 6;
-        if (chars.length < MIN_LEN) return;
+        if (!chars || chars.length < 3) return;
 
         let avg = 1000;
-        if (times.length >= 2) {
-          const total = times[times.length - 1] - times[0];
-          avg = total / (times.length - 1);
-        }
+        if (times.length >= 2) avg = (times[times.length - 1] - times[0]) / (times.length - 1);
 
         if (avg <= 60) {
           e.preventDefault();
           e.stopPropagation();
-          openWithCode(chars); // ✅ abre modal
+          e.stopImmediatePropagation(); 
+          openWithCode(chars); 
         }
       }
     };
