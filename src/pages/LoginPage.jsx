@@ -1,69 +1,51 @@
-
-import React, { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
-import { motion } from 'framer-motion';
-import { LayoutGrid, Loader2, Lock, Mail } from 'lucide-react';
-import { Button } from '@/components/ui/button';
-import { useAuth } from '@/contexts/AuthContext';
-import { toast } from '@/components/ui/use-toast';
+import React, { useState } from "react";
+import { useNavigate } from "react-router-dom";
+import { motion } from "framer-motion";
+import { LayoutGrid, Loader2, Lock, Mail } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { useAuth } from "@/contexts/AuthContext";
+import { toast } from "@/components/ui/use-toast";
 
 const LoginPage = () => {
-  const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
-  const [loading, setLoading] = useState(false);
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [loadingUI, setLoadingUI] = useState(false);
+
   const { login } = useAuth();
   const navigate = useNavigate();
 
   const handleLogin = async (e) => {
     e.preventDefault();
-    setLoading(true);
+    setLoadingUI(true);
 
     try {
-      const user = await login(email, password);
-      
+      await login(email, password);
+
       toast({
         title: "¡Bienvenido!",
         description: "Has iniciado sesión correctamente.",
       });
 
-      // Role-based Redirection Logic
-      const role = user.profile?.role;
-      const branchId = user.profile?.branch_id;
-
-      if (role === 'owner') {
-        navigate('/torre-control');
-      } else if (role === 'branch') {
-        if (branchId) {
-          navigate(`/branch/${branchId}/sales`);
-        } else {
-          toast({
-            title: "Error de Cuenta",
-            description: "Este usuario de sucursal no tiene una sucursal asignada.",
-            variant: "destructive"
-          });
-        }
-      } else {
-        // Fallback
-        navigate('/torre-control');
-      }
-
+      // ✅ SIEMPRE vamos a una pantalla de redirección segura
+      navigate("/post-login", { replace: true });
     } catch (error) {
       console.error("Login error:", error);
       toast({
         title: "Error al iniciar sesión",
-        description: error.message === "Invalid login credentials" 
-          ? "Credenciales incorrectas. Verifica tu correo y contraseña." 
-          : "Ocurrió un problema al intentar ingresar.",
-        variant: "destructive"
+        description:
+          error.message === "Invalid login credentials"
+            ? "Credenciales incorrectas. Verifica tu correo y contraseña."
+            : "Ocurrió un problema al intentar ingresar.",
+        variant: "destructive",
       });
     } finally {
-      setLoading(false);
+      setLoadingUI(false);
     }
   };
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-indigo-50 to-white flex items-center justify-center p-4">
-      <motion.div 
+      <motion.div
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.5 }}
@@ -108,14 +90,14 @@ const LoginPage = () => {
             </div>
           </div>
 
-          <Button 
-            type="submit" 
-            disabled={loading}
+          <Button
+            type="submit"
+            disabled={loadingUI}
             className="w-full bg-indigo-600 hover:bg-indigo-700 text-white py-6 rounded-xl font-semibold shadow-lg shadow-indigo-100 mt-4"
           >
-            {loading ? <Loader2 className="w-5 h-5 animate-spin" /> : 'Iniciar Sesión'}
+            {loadingUI ? <Loader2 className="w-5 h-5 animate-spin" /> : "Iniciar Sesión"}
           </Button>
-          
+
           <div className="text-center pt-4">
             <a href="#" className="text-sm text-indigo-600 hover:text-indigo-800 font-medium">
               ¿Olvidaste tu contraseña?
