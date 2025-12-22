@@ -1,11 +1,14 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { useParams } from 'react-router-dom';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import SalesHistoryPage from './SalesHistoryPage';
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Search, ShoppingCart, Trash2, Plus, Minus, Loader2, Tag, Receipt } from 'lucide-react';
+import { 
+  Search, ShoppingCart, Trash2, Plus, Minus, 
+  Loader2, Tag, Receipt, ChevronLeft, ChevronRight 
+} from 'lucide-react';
 import { supabase } from '@/lib/customSupabaseClient';
 import { toast } from '@/components/ui/use-toast';
 import { formatCurrency, formatDateTime } from '@/lib/utils';
@@ -27,6 +30,12 @@ const SalesModule = () => {
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedCategory, setSelectedCategory] = useState('all');
+  
+  // ✅ ESTADOS DE OPTIMIZACIÓN
+  const [currentPage, setCurrentPage] = useState(1);
+  const [totalCount, setTotalCount] = useState(0);
+  const itemsPerPage = 20;
+
   const [cart, setCart] = useState([]);
   const [selectedPaymentMethod, setSelectedPaymentMethod] = useState(null);
   const [isProcessing, setIsProcessing] = useState(false);
@@ -34,31 +43,61 @@ const SalesModule = () => {
   const [branchDetails, setBranchDetails] = useState(null);
   const [isTicketDialogOpen, setIsTicketDialogOpen] = useState(false);
 
-  useEffect(() => {
-    if (branchId) {
-      fetchProductsAndCategories();
-      fetchPaymentMethods();
-      fetchBranchDetails();
-    }
-  }, [branchId]);
-
-  const fetchBranchDetails = async () => {
-    const { data } = await supabase.from('branches').select('name').eq('id', branchId).single();
-    if (data) setBranchDetails(data);
-  };
-  
-  const fetchProductsAndCategories = async () => {
+  // ✅ FETCH OPTIMIZADO POR SERVIDOR
+  const fetchProducts = useCallback(async () => {
+    if (!branchId) return;
     try {
       setLoading(true);
-      const { data: cats } = await supabase.from('categories').select('*').eq('branch_id', branchId);
-      const { data: prods } = await supabase.from('products').select('*, categories(name)').eq('branch_id', branchId);
-      setCategories(cats || []);
-      setProducts(prods || []);
+      const from = (currentPage - 1) * itemsPerPage;
+      const to = from + itemsPerPage - 1;
+
+      let query = supabase
+        .from('products')
+        .select('*, categories(name)', { count: 'exact' })
+        .eq('branch_id', branchId)
+        .order('name', { ascending: true })
+        .range(from, to);
+
+      if (searchTerm) {
+        query = query.ilike('name', `%${searchTerm}%`);
+      }
+
+      if (selectedCategory !== 'all') {
+        query = query.eq('category_id', selectedCategory);
+      }
+
+      const { data, count, error } = await query;
+      if (error) throw error;
+
+      setProducts(data || []);
+      setTotalCount(count || 0);
     } catch (error) {
       toast({ title: "Error cargando productos", variant: "destructive" });
     } finally {
       setLoading(false);
     }
+  }, [branchId, currentPage, searchTerm, selectedCategory]);
+
+  useEffect(() => {
+    if (branchId) {
+      fetchProducts();
+      fetchCategories();
+      fetchPaymentMethods();
+      fetchBranchDetails();
+    }
+  }, [branchId, fetchProducts]);
+
+  // Resetear página al filtrar
+  useEffect(() => { setCurrentPage(1); }, [searchTerm, selectedCategory]);
+
+  const fetchCategories = async () => {
+    const { data } = await supabase.from('categories').select('*').eq('branch_id', branchId).order('name');
+    if (data) setCategories(data);
+  };
+
+  const fetchBranchDetails = async () => {
+    const { data } = await supabase.from('branches').select('name').eq('id', branchId).single();
+    if (data) setBranchDetails(data);
   };
 
   const fetchPaymentMethods = async () => {
@@ -136,7 +175,7 @@ const SalesModule = () => {
       setLastSale({ ...sale, sale_items: saleItems, payment_method: selectedPaymentMethod.name });
       setIsTicketDialogOpen(true);
       setCart([]);
-      fetchProductsAndCategories();
+      fetchProducts();
     } catch (error) {
       toast({ title: "Error al procesar", variant: "destructive" });
     } finally {
@@ -146,30 +185,22 @@ const SalesModule = () => {
 
   const printTicket = (sale) => {
     const ticketContent = `
-      <html><head><title>Ticket</title><style>body{font-family:'Courier New',monospace;font-size:12px;max-width:300px;margin:0 auto;padding:10px}h3,p{margin:0}.header{text-align:center;margin-bottom:10px}.divider{border-top:1px dashed #000;margin:10px 0}.item,.total{display:flex;justify-content:space-between}.item{margin-bottom:5px}.total{font-weight:700;font-size:14px;margin-top:10px}.footer{text-align:center;margin-top:20px;font-size:10px}img{display:block;margin:10px auto;width:80px;height:80px}</style></head><body>
+      <html><head><title>Ticket</title><style>body{font-family:'Courier New',monospace;font-size:12px;max-width:300px;margin:0 auto;padding:10px}h3,p{margin:0}.header{text-align:center;margin-bottom:10px}.divider{border-top:1px dashed #000;margin:10px 0}.item,.total{display:flex;justify-content:space-between}.item{margin-bottom:5px}.total{font-weight:700;font-size:14px;margin-top:10px}.footer{text-align:center;margin-top:20px;font-size:10px}</style></head><body>
       <div class="header"><h3>${branchDetails?.name || 'Sucursal'}</h3><p>${formatDateTime(sale.created_at)}</p></div><div class="divider"></div>
       ${sale.sale_items.map(item=>`<div class="item"><span>${item.quantity}x ${item.product_name}</span><span>$${(item.unit_price*item.quantity).toLocaleString('es-AR')}</span></div>`).join('')}
       <div class="divider"></div><div class="total"><span>TOTAL</span><span>${formatCurrency(sale.total)}</span></div>
       <script>window.onload=function(){window.print();window.close()}</script></body></html>
     `;
-    const printWindow = window.open('','','height=600,width=400');
-    printWindow.document.write(ticketContent);
-    printWindow.document.close();
+    const win = window.open('','','height=600,width=400');
+    win.document.write(ticketContent);
+    win.document.close();
   };
 
-  const filteredProducts = products.filter(p => {
-    const matchesSearch = p.name.toLowerCase().includes(searchTerm.toLowerCase());
-    const matchesCategory = selectedCategory === 'all' || p.category_id === selectedCategory;
-    return matchesSearch && matchesCategory;
-  });
+  const totalPages = Math.ceil(totalCount / itemsPerPage);
 
   return (
-    <>
-    {/* Ajuste de altura para que en móvil no se pierda el final */}
     <div className="min-h-screen lg:h-[calc(100vh-100px)] flex flex-col pb-20 lg:pb-0">
       <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full flex flex-col h-full">
-        
-        {/* Cabecera Responsiva */}
         <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4 mb-6 shrink-0 px-1">
           <h2 className="text-2xl md:text-3xl font-bold tracking-tight text-gray-900">Punto de Venta</h2>
           <TabsList className="grid w-full md:w-[400px] grid-cols-2 bg-gray-100">
@@ -179,7 +210,6 @@ const SalesModule = () => {
         </div>
 
         <TabsContent value="new-sale" className="flex-1 overflow-hidden mt-0">
-          {/* Grid Principal: Stack en móvil, Columnas en PC */}
           <div className="flex flex-col lg:grid lg:grid-cols-12 gap-6 h-full overflow-y-auto lg:overflow-hidden px-1">
             
             {/* Sección de Productos */}
@@ -189,7 +219,6 @@ const SalesModule = () => {
                   <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
                   <Input placeholder="Buscar productos..." className="pl-9 bg-white" value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} />
                 </div>
-                {/* Categorías con Scroll Horizontal */}
                 <div className="flex gap-2 overflow-x-auto pb-1 scrollbar-hide">
                   <Button variant={selectedCategory === 'all' ? "default" : "outline"} size="sm" onClick={() => setSelectedCategory('all')} className="rounded-full whitespace-nowrap">Todos</Button>
                   {categories.map(cat => (
@@ -201,16 +230,15 @@ const SalesModule = () => {
               <div className="flex-1 overflow-y-auto p-3 md:p-4 bg-gray-50/30">
                 {loading ? (
                   <div className="flex justify-center items-center h-40"><Loader2 className="animate-spin text-indigo-600" /></div>
-                ) : filteredProducts.length === 0 ? (
-                  <div className="text-center text-gray-400 mt-10">No hay productos</div>
+                ) : products.length === 0 ? (
+                  <div className="text-center text-gray-400 mt-10">No se encontraron productos</div>
                 ) : (
-                  /* Grid de Cards: 2 columnas en móvil, 3 en PC */
                   <div className="grid grid-cols-2 md:grid-cols-3 gap-3 md:gap-4">
-                    {filteredProducts.map(product => (
+                    {products.map(product => (
                       <Card key={product.id} className="cursor-pointer hover:border-indigo-500 transition-all active:scale-95 group" onClick={() => addToCart(product)}>
                         <CardContent className="p-3 md:p-4">
                           <div className="flex justify-between items-start mb-2">
-                            <div className="h-8 w-8 md:h-10 md:w-10 rounded-lg bg-indigo-50 flex items-center justify-center text-indigo-600 font-bold text-[10px] md:text-xs">{product.name.substring(0, 2).toUpperCase()}</div>
+                            <div className="h-8 w-8 md:h-10 md:w-10 rounded-lg bg-indigo-50 flex items-center justify-center text-indigo-600 font-bold text-[10px] md:text-xs uppercase">{product.name.substring(0, 2)}</div>
                             <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-medium ${product.stock > 5 ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>Stock: {product.stock}</span>
                           </div>
                           <h3 className="text-xs md:text-sm font-medium text-gray-900 line-clamp-2 h-8 md:h-10 mb-1">{product.name}</h3>
@@ -221,9 +249,21 @@ const SalesModule = () => {
                   </div>
                 )}
               </div>
+
+              {/* ✅ NAVEGACIÓN DE PRODUCTOS (OPTIMIZADO) */}
+              {!loading && totalPages > 1 && (
+                <div className="p-3 border-t border-gray-100 flex justify-between items-center bg-white shrink-0">
+                  <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest">Total: {totalCount} prods</p>
+                  <div className="flex items-center gap-2">
+                    <Button variant="outline" size="sm" onClick={() => setCurrentPage(prev => Math.max(1, prev - 1))} disabled={currentPage === 1} className="rounded-xl h-8 w-8 p-0"><ChevronLeft className="w-4 h-4" /></Button>
+                    <span className="text-[10px] font-black text-indigo-600 bg-indigo-50 px-3 py-1 rounded-xl border border-indigo-100 uppercase">PÁG {currentPage} / {totalPages}</span>
+                    <Button variant="outline" size="sm" onClick={() => setCurrentPage(prev => Math.min(totalPages, prev + 1))} disabled={currentPage === totalPages} className="rounded-xl h-8 w-8 p-0"><ChevronRight className="w-4 h-4" /></Button>
+                  </div>
+                </div>
+              )}
             </div>
 
-            {/* Carrito de Venta */}
+            {/* Carrito */}
             <div className="order-1 lg:order-2 lg:col-span-4 flex flex-col h-auto lg:h-full bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden min-h-[400px]">
               <div className="p-4 border-b border-gray-100 bg-gray-50/50 flex items-center gap-2">
                 <ShoppingCart className="w-5 h-5 text-indigo-600" />
@@ -231,7 +271,7 @@ const SalesModule = () => {
                 {cart.length > 0 && <span className="ml-auto bg-indigo-600 text-white text-[10px] px-2 py-0.5 rounded-full">{cart.length}</span>}
               </div>
 
-              <div className="flex-1 overflow-y-auto p-3 md:p-4 space-y-3 max-h-[300px] lg:max-h-none">
+              <div className="flex-1 overflow-y-auto p-3 space-y-3 max-h-[300px] lg:max-h-none">
                 {cart.length === 0 ? (
                   <div className="h-full flex flex-col items-center justify-center text-gray-400 py-10 space-y-2 opacity-40">
                     <ShoppingCart className="w-12 h-12" />
@@ -257,18 +297,12 @@ const SalesModule = () => {
                 )}
               </div>
 
-              {/* Métodos de Pago y Total */}
               <div className="p-4 border-t border-gray-100 bg-gray-50 space-y-4">
                 <div className="space-y-2">
                   <label className="text-[10px] font-bold text-gray-500 uppercase tracking-wider">Método de Pago</label>
                   <div className="grid grid-cols-2 gap-2">
                     {paymentMethods.map(method => (
-                      <Button 
-                        key={method.id} 
-                        variant={selectedPaymentMethod?.id === method.id ? "default" : "outline"} 
-                        onClick={() => setSelectedPaymentMethod(method)} 
-                        className={`w-full text-[10px] h-auto py-2.5 flex flex-col items-center gap-1 border-gray-200 ${selectedPaymentMethod?.id === method.id ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-white hover:bg-indigo-50'}`}
-                      >
+                      <Button key={method.id} variant={selectedPaymentMethod?.id === method.id ? "default" : "outline"} onClick={() => setSelectedPaymentMethod(method)} className={`w-full text-[10px] h-auto py-2.5 flex flex-col border-gray-200 ${selectedPaymentMethod?.id === method.id ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-white hover:bg-indigo-50'}`}>
                         <span className="font-bold truncate w-full px-1">{method.name}</span>
                         {Number(method.discount_percentage) > 0 && <span className="text-[9px] bg-green-500 text-white px-1.5 rounded-full">-{method.discount_percentage}%</span>}
                       </Button>
@@ -277,14 +311,13 @@ const SalesModule = () => {
                 </div>
 
                 <div className="pt-2 border-t border-gray-200 space-y-1">
-                   <div className="flex justify-between items-center text-xs text-gray-500 font-medium"><span>Subtotal</span><span>{formatCurrency(subtotal)}</span></div>
-                   {discountPercent > 0 && <div className="flex justify-between items-center text-xs text-green-600 font-bold"><span className="flex items-center gap-1"><Tag className="w-3 h-3" /> Descuento ({discountPercent}%)</span><span>- {formatCurrency(discountAmount)}</span></div>}
-                   <div className="flex justify-between items-center pt-2"><span className="text-gray-900 font-bold text-sm">Total a Pagar</span><span className="text-xl md:text-2xl font-black text-indigo-700">{formatCurrency(total)}</span></div>
+                   <div className="flex justify-between text-xs text-gray-500 font-medium"><span>Subtotal</span><span>{formatCurrency(subtotal)}</span></div>
+                   {discountPercent > 0 && <div className="flex justify-between text-xs text-green-600 font-bold"><span><Tag className="w-3 h-3 inline mr-1" /> Dcto ({discountPercent}%)</span><span>- {formatCurrency(discountAmount)}</span></div>}
+                   <div className="flex justify-between items-center pt-2"><span className="text-gray-900 font-bold text-sm">Total</span><span className="text-xl md:text-2xl font-black text-indigo-700">{formatCurrency(total)}</span></div>
                 </div>
 
-                <Button className="w-full bg-indigo-600 hover:bg-indigo-700 text-sm md:text-lg h-12 font-bold shadow-lg shadow-indigo-100 active:scale-95 transition-transform" disabled={cart.length === 0 || isProcessing} onClick={handleCheckout}>
-                  {isProcessing ? <Loader2 className="animate-spin mr-2 h-4 w-4" /> : <ShoppingCart className="mr-2 h-4 w-4" />}
-                  Confirmar Venta
+                <Button className="w-full bg-indigo-600 hover:bg-indigo-700 text-sm md:text-lg h-12 font-bold shadow-lg" disabled={cart.length === 0 || isProcessing} onClick={handleCheckout}>
+                  {isProcessing ? <Loader2 className="animate-spin mr-2 h-4 w-4" /> : <ShoppingCart className="mr-2 h-4 w-4" />} Confirmar Venta
                 </Button>
               </div>
             </div>
@@ -292,32 +325,10 @@ const SalesModule = () => {
         </TabsContent>
         
         <TabsContent value="history" className="flex-1 overflow-hidden mt-0 px-1">
-          <div className="h-full overflow-y-auto bg-white rounded-xl border border-gray-200 shadow-sm">
-            <SalesHistoryPage />
-          </div>
+          <SalesHistoryPage />
         </TabsContent>
       </Tabs>
     </div>
-    
-    {/* Diálogo de éxito ajustado */}
-    <Dialog open={isTicketDialogOpen} onOpenChange={setIsTicketDialogOpen}>
-      <DialogContent className="max-w-[90%] md:max-w-md rounded-2xl">
-        <DialogHeader><DialogTitle className="text-center">¡Venta Exitosa!</DialogTitle></DialogHeader>
-        <div className="text-center py-4 md:py-6">
-          <div className="w-16 h-16 bg-green-100 text-green-600 rounded-full flex items-center justify-center mx-auto mb-4">
-            <Receipt className="w-8 h-8" />
-          </div>
-          <p className="text-sm md:text-lg font-medium text-gray-600">La transacción ha sido registrada.</p>
-        </div>
-        <DialogFooter className="flex flex-col gap-2 sm:flex-row">
-          <Button variant="outline" className="w-full" onClick={() => setIsTicketDialogOpen(false)}>Cerrar</Button>
-          <Button className="w-full bg-indigo-600" onClick={() => { if(lastSale) printTicket(lastSale) }}>
-            <Receipt className="w-4 h-4 mr-2"/> Ver Ticket
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
-    </>
   );
 };
 
