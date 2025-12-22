@@ -95,7 +95,7 @@ const LogsPage = () => {
       // Invocamos la Edge Function de Supabase
       const { data, error } = await supabase.functions.invoke('send-test-email', {
         body: { 
-          to: 'tomasace2727@gmail.com',
+          to: 'puoxxyt27@gmail.com',
           subject: `Prueba de Email - Sucursal ${branchName}`,
           message: 'Este es un correo de prueba enviado desde el sistema de logs.'
         },
@@ -105,7 +105,7 @@ const LogsPage = () => {
 
       toast({
         title: "¡Email Enviado!",
-        description: "Revisá la casilla tomasace2727@gmail.com",
+        description: "Revisá la casilla puoxxyt27@gmail.com",
       });
     } catch (err) {
       console.error("Error enviando email:", err);
