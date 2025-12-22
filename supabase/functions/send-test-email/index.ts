@@ -1,47 +1,75 @@
-import { serve } from "https://deno.land/std@0.168.0/http/server.ts"
+import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 
-// Esta variable la configuraremos en el siguiente paso en la terminal
-const RESEND_API_KEY = Deno.env.get('RESEND_API_KEY')
+const RESEND_API_KEY = Deno.env.get("RESEND_API_KEY");
 
 serve(async (req) => {
-  // Manejo de CORS para que tu web pueda llamar a la función
-  if (req.method === 'OPTIONS') {
-    return new Response('ok', { headers: { 
-      "Access-Control-Allow-Origin": "*",
-      "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
-    } })
+  // CORS
+  if (req.method === "OPTIONS") {
+    return new Response("ok", {
+      headers: {
+        "Access-Control-Allow-Origin": "*",
+        "Access-Control-Allow-Headers":
+          "authorization, x-client-info, apikey, content-type",
+        "Access-Control-Allow-Methods": "POST, OPTIONS",
+      },
+    });
   }
 
   try {
-    const { to, subject, message } = await req.json()
+    const { to, subject, message } = await req.json();
 
-    const res = await fetch('https://api.resend.com/emails', {
-      method: 'POST',
+    if (!to || !subject || !message) {
+      return new Response(
+        JSON.stringify({ error: "Faltan campos: to, subject, message" }),
+        {
+          status: 400,
+          headers: {
+            "Content-Type": "application/json",
+            "Access-Control-Allow-Origin": "*",
+          },
+        }
+      );
+    }
+
+    const res = await fetch("https://api.resend.com/emails", {
+      method: "POST",
       headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${RESEND_API_KEY}`,
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${RESEND_API_KEY}`,
       },
       body: JSON.stringify({
-        from: 'ERP Franquify <onboarding@resend.dev>',
+        // ✅ IMPORTANTE: From debe ser tu dominio verificado
+        from: "ERP Creatu <no-reply@creatumundoweb.com.ar>",
         to: [to],
-        subject: subject,
-        html: `<strong>${message}</strong>`,
+        subject,
+        html: `<strong>${String(message)}</strong>`,
       }),
-    })
+    });
 
-    const data = await res.json()
-    
-    return new Response(JSON.stringify(data), { 
-      status: 200, 
-      headers: { 
+    const data = await res.json();
+
+    // Si Resend devuelve error, propagalo
+    if (!res.ok) {
+      return new Response(JSON.stringify(data), {
+        status: res.status,
+        headers: {
+          "Content-Type": "application/json",
+          "Access-Control-Allow-Origin": "*",
+        },
+      });
+    }
+
+    return new Response(JSON.stringify(data), {
+      status: 200,
+      headers: {
         "Content-Type": "application/json",
-        "Access-Control-Allow-Origin": "*" 
-      } 
-    })
+        "Access-Control-Allow-Origin": "*",
+      },
+    });
   } catch (error) {
-    return new Response(JSON.stringify({ error: error.message }), { 
+    return new Response(JSON.stringify({ error: error.message }), {
       status: 500,
-      headers: { "Access-Control-Allow-Origin": "*" }
-    })
+      headers: { "Access-Control-Allow-Origin": "*" },
+    });
   }
-})
+});
