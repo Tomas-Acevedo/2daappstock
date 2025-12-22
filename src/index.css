@@ -1,0 +1,13 @@
+
+/*
+  TEMPLATE STYLES: These styles are used as a base template.
+  AI is allowed to modify these styles as needed.
+*/
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+body {
+    @apply bg-gray-100 text-gray-900; /* Updated global background to light gray, text to dark gray */
+    font-family: 'DM Sans', sans-serif;
+}
