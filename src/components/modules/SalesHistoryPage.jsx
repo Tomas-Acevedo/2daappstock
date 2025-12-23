@@ -24,8 +24,11 @@ const SalesHistoryPage = () => {
   const [roleLoading, setRoleLoading] = useState(true);
   const [branchName, setBranchName] = useState('Sucursal');
   const [userRole, setUserRole] = useState(null); 
-  const [paymentMethods, setPaymentMethods] = useState([]); // Métodos dinámicos
+  const [paymentMethods, setPaymentMethods] = useState([]);
   
+  // Estado para los totales del periodo completo
+  const [summaryData, setSummaryData] = useState({ total: 0, byMethod: {} });
+
   // Paginación
   const [page, setPage] = useState(0);
   const pageSize = 20;
@@ -43,12 +46,14 @@ const SalesHistoryPage = () => {
   const [editingSale, setEditingSale] = useState(null);
   const [editForm, setEditForm] = useState({ customer_name: '', payment_method: '' });
 
+  const isOwner = userRole === 'owner';
+
   useEffect(() => {
     const initializePage = async () => {
       setRoleLoading(true);
       await fetchUserRole();
       await fetchBranchDetails();
-      await fetchPaymentMethods(); // Cargar métodos de la DB
+      await fetchPaymentMethods();
       setRoleLoading(false);
     };
     initializePage();
@@ -92,6 +97,7 @@ const SalesHistoryPage = () => {
   const fetchSales = async () => {
     setLoading(true);
     try {
+      // 1. CONSULTA PARA LA TABLA (CON PAGINACIÓN)
       let query = supabase
         .from('sales')
         .select(`*, sale_items (product_id, quantity, product_name, unit_price)`)
@@ -99,20 +105,57 @@ const SalesHistoryPage = () => {
         .order('created_at', { ascending: false })
         .range(page * pageSize, (page + 1) * pageSize - 1);
 
-      if (userRole === 'owner') {
-        if (dateRange.start) query = query.gte('created_at', `${dateRange.start}T00:00:00-03:00`);
-        if (dateRange.end) query = query.lte('created_at', `${dateRange.end}T23:59:59-03:00`);
-        if (paymentFilter !== 'all') query = query.eq('payment_method', paymentFilter);
+      // 2. CONSULTA PARA TOTALES (SIN PAGINACIÓN - SOLO COLUMNAS NECESARIAS)
+      let totalQuery = supabase
+        .from('sales')
+        .select('total, payment_method')
+        .eq('branch_id', branchId);
+
+      // Aplicar filtros de fecha y método a AMBAS consultas
+      if (isOwner) {
+        if (dateRange.start) {
+          const startStr = `${dateRange.start}T00:00:00-03:00`;
+          query = query.gte('created_at', startStr);
+          totalQuery = totalQuery.gte('created_at', startStr);
+        }
+        if (dateRange.end) {
+          const endStr = `${dateRange.end}T23:59:59-03:00`;
+          query = query.lte('created_at', endStr);
+          totalQuery = totalQuery.lte('created_at', endStr);
+        }
+        if (paymentFilter !== 'all') {
+          query = query.eq('payment_method', paymentFilter);
+          totalQuery = totalQuery.eq('payment_method', paymentFilter);
+        }
       } else {
         const today = getArgentinaDate();
-        query = query.gte('created_at', `${today}T00:00:00-03:00`);
-        query = query.lte('created_at', `${today}T23:59:59-03:00`);
+        const startToday = `${today}T00:00:00-03:00`;
+        const endToday = `${today}T23:59:59-03:00`;
+        query = query.gte('created_at', startToday).lte('created_at', endToday);
+        totalQuery = totalQuery.gte('created_at', startToday).lte('created_at', endToday);
       }
 
-      const { data, error } = await query;
-      if (error) throw error;
-      setHasMore(data.length === pageSize);
-      setSales(data || []);
+      // Ejecutar ambas consultas en paralelo
+      const [salesRes, totalsRes] = await Promise.all([query, totalQuery]);
+
+      if (salesRes.error) throw salesRes.error;
+      if (totalsRes.error) throw totalsRes.error;
+
+      // Actualizar tabla
+      setSales(salesRes.data || []);
+      setHasMore(salesRes.data.length === pageSize);
+
+      // Calcular totales sobre el set completo de datos filtrados
+      const calculatedTotals = totalsRes.data.reduce((acc, sale) => {
+        const method = sale.payment_method || 'Sin especificar';
+        const amount = Number(sale.total);
+        acc.total += amount;
+        acc.byMethod[method] = (acc.byMethod[method] || 0) + amount;
+        return acc;
+      }, { total: 0, byMethod: {} });
+
+      setSummaryData(calculatedTotals);
+
     } catch (error) {
       console.error(error);
       toast({ title: "Error cargando historial", variant: "destructive" });
@@ -155,7 +198,8 @@ const SalesHistoryPage = () => {
       }).eq('id', editingSale.id);
       if (error) throw error;
       toast({ title: "Venta actualizada" });
-      setSales(sales.map(s => s.id === editingSale.id ? { ...s, ...editForm } : s));
+      // Refrescamos todo para que los totales también se actualicen si cambió el método
+      fetchSales(); 
       setIsEditDialogOpen(false);
     } catch (error) {
       toast({ title: "Error al actualizar", variant: "destructive" });
@@ -185,15 +229,6 @@ const SalesHistoryPage = () => {
     );
   }
 
-  const isOwner = userRole === 'owner';
-
-  // --- Lógica para Resumen Dinámico ---
-  const totalsByMethod = sales.reduce((acc, sale) => {
-    const method = sale.payment_method || 'Sin especificar';
-    acc[method] = (acc[method] || 0) + Number(sale.total);
-    return acc;
-  }, {});
-
   return (
     <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="space-y-6">
       <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
@@ -207,7 +242,6 @@ const SalesHistoryPage = () => {
         </div>
       </div>
 
-      {/* --- FILTROS DINÁMICOS: SOLO OWNER --- */}
       {isOwner && (
         <div className="bg-white p-4 rounded-xl shadow-sm border border-gray-200 flex flex-col md:flex-row gap-4 items-end">
           <div className="space-y-1 flex-1 w-full">
@@ -243,14 +277,14 @@ const SalesHistoryPage = () => {
         </div>
       )}
 
-      {/* RESUMEN DINÁMICO (Genera una tarjeta por cada método que tenga ventas) */}
+      {/* RESUMEN DINÁMICO BASADO EN EL FILTRO TOTAL, NO EN LA PÁGINA */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
         <div className="bg-white p-4 rounded-xl shadow-sm border border-gray-200">
-          <p className="text-xs text-gray-500 uppercase font-bold mb-1">Total {isOwner ? '(Periodo)' : '(Hoy)'}</p>
-          <p className="text-2xl font-bold text-gray-900">{formatCurrency(sales.reduce((sum, s) => sum + Number(s.total), 0))}</p>
+          <p className="text-xs text-gray-500 uppercase font-bold mb-1">Total General {isOwner ? '(Periodo)' : '(Hoy)'}</p>
+          <p className="text-2xl font-bold text-gray-900">{formatCurrency(summaryData.total)}</p>
         </div>
         
-        {Object.entries(totalsByMethod).map(([method, total], idx) => (
+        {Object.entries(summaryData.byMethod).map(([method, total], idx) => (
           <div key={method} className={`${idx % 2 === 0 ? 'bg-green-50 border-green-100 text-green-800' : 'bg-blue-50 border-blue-100 text-blue-800'} p-4 rounded-xl shadow-sm border`}>
             <div className="flex items-center gap-2 mb-1">
                <Wallet className="w-3 h-3" />
