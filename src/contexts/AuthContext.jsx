@@ -6,12 +6,11 @@ const AuthContext = createContext(null);
 export const AuthProvider = ({ children }) => {
   const [user, setUser] = useState(null);
 
-  // loading = "estado global de auth"
-  // empieza true porque vamos a restaurar sesión al montar
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(true);          // sesión
+  const [profileLoading, setProfileLoading] = useState(false); // perfil/rol
 
-  // Traer profile sin romper (si falla, no bloquea sesión)
-  const hydrateProfileAsync = async (authUser) => {
+  const fetchProfile = async (authUser) => {
+    setProfileLoading(true);
     try {
       const { data, error } = await supabase
         .from("profiles")
@@ -21,16 +20,22 @@ export const AuthProvider = ({ children }) => {
 
       if (error) {
         console.warn("AuthContext: profile fetch error:", error);
-        return;
+        // mantenemos el user igual, pero profile queda null
+        setUser((prev) => (prev?.id === authUser.id ? { ...prev, profile: null } : prev));
+        return null;
       }
 
       setUser((prev) => {
-        // si el user cambió (logout/cambio), no tocar
         if (!prev || prev.id !== authUser.id) return prev;
         return { ...prev, profile: data ?? null };
       });
+
+      return data ?? null;
     } catch (e) {
       console.warn("AuthContext: profile fetch crashed:", e);
+      return null;
+    } finally {
+      setProfileLoading(false);
     }
   };
 
@@ -39,24 +44,16 @@ export const AuthProvider = ({ children }) => {
 
     const restore = async () => {
       try {
-        console.log("AuthContext: restoring session...");
-        const {
-          data: { session },
-          error,
-        } = await supabase.auth.getSession();
-
+        const { data: { session }, error } = await supabase.auth.getSession();
         if (error) console.warn("AuthContext: getSession error:", error);
-
         if (!mounted) return;
 
         if (session?.user) {
-          // ✅ setUser inmediato (sin esperar profiles)
           setUser({ ...session.user, profile: null });
-          hydrateProfileAsync(session.user);
-          console.log("AuthContext: session restored ✅");
+          // 👇 importante: arrancamos profile async, pero sin romper la UI
+          fetchProfile(session.user);
         } else {
           setUser(null);
-          console.log("AuthContext: no session");
         }
       } finally {
         if (mounted) setLoading(false);
@@ -66,11 +63,9 @@ export const AuthProvider = ({ children }) => {
     restore();
 
     const { data } = supabase.auth.onAuthStateChange((_event, session) => {
-      console.log("AuthContext: auth state changed:", _event);
-
       if (session?.user) {
         setUser({ ...session.user, profile: null });
-        hydrateProfileAsync(session.user);
+        fetchProfile(session.user);
       } else {
         setUser(null);
       }
@@ -84,31 +79,15 @@ export const AuthProvider = ({ children }) => {
 
   const login = async (email, password) => {
     setLoading(true);
-
     try {
-      console.log("AuthContext: Manual login started for", email);
-
-      const { data, error } = await supabase.auth.signInWithPassword({
-        email,
-        password,
-      });
-
+      const { data, error } = await supabase.auth.signInWithPassword({ email, password });
       if (error) throw error;
       if (!data?.user) throw new Error("No user returned from Supabase");
 
-      // ✅ setUser inmediato (no se cuelga aunque profiles falle)
-      const authUser = data.user;
-      const fullUser = { ...authUser, profile: null };
-      setUser(fullUser);
+      setUser({ ...data.user, profile: null });
+      fetchProfile(data.user);
 
-      // ✅ profile en background
-      hydrateProfileAsync(authUser);
-
-      // ✅ log de actividad (no bloquea)
-      // (si tu función requiere branch_id y depende del profile, la puedes mover a cuando profile existe)
-      // Por ahora lo dejamos fuera para que NO trabe el login
-
-      return fullUser;
+      return data.user;
     } finally {
       setLoading(false);
     }
@@ -125,7 +104,7 @@ export const AuthProvider = ({ children }) => {
   };
 
   return (
-    <AuthContext.Provider value={{ user, login, logout, loading }}>
+    <AuthContext.Provider value={{ user, login, logout, loading, profileLoading }}>
       {children}
     </AuthContext.Provider>
   );

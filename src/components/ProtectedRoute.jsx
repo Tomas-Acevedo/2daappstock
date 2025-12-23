@@ -1,34 +1,28 @@
+import React from "react";
+import { Navigate, useLocation } from "react-router-dom";
+import { useAuth } from "@/contexts/AuthContext";
 
-import React from 'react';
-import { Navigate, useLocation } from 'react-router-dom';
-import { useAuth } from '@/contexts/AuthContext';
+const Spinner = () => (
+  <div className="min-h-screen flex items-center justify-center bg-slate-900">
+    <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-indigo-500"></div>
+  </div>
+);
 
 const ProtectedRoute = ({ children, requiredRole }) => {
-  const { user, loading } = useAuth();
+  const { user, loading, profileLoading } = useAuth();
   const location = useLocation();
 
-  if (loading) {
-    return (
-      <div className="min-h-screen flex items-center justify-center bg-slate-900">
-        <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-indigo-500"></div>
-      </div>
-    );
-  }
+  // 1) Esperar restaurar sesión
+  if (loading) return <Spinner />;
 
-  // 1. Not logged in -> Redirect to Login
-  if (!user) {
-    console.log(`ProtectedRoute: Access denied to ${location.pathname} - User not authenticated`);
-    return <Navigate to="/login" replace state={{ from: location }} />;
-  }
+  // 2) No logueado
+  if (!user) return <Navigate to="/login" replace state={{ from: location }} />;
 
-  // 2. Role Check (Fix: Check user.profile.role, not user.loginMode)
+  // 3) Si requiere rol, esperar profile (evita “me desloguea” al reabrir PWA)
   if (requiredRole) {
-    const userRole = user.profile?.role;
-    
-    if (userRole !== requiredRole) {
-      console.warn(`ProtectedRoute: Role Mismatch. Required: ${requiredRole}, Found: ${userRole}`);
-      // Optional: Redirect to a generic "Unauthorized" page or back to their allowed dashboard
-      // For now, bounce back to login to prevent unauthorized viewing
+    if (profileLoading || !user.profile) return <Spinner />;
+
+    if (user.profile.role !== requiredRole) {
       return <Navigate to="/login" replace />;
     }
   }
