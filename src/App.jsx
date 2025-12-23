@@ -13,11 +13,14 @@ import BranchDashboard from "@/pages/BranchDashboard";
 import ScanProvider from "@/scan/ScanProvider";
 import GlobalScanListener from "@/scan/GlobalScanListener";
 import ScanDialog from "@/scan/ScanDialog";
+import OfflineBlocker from "@/components/OfflineBlocker";
+
 function App() {
   return (
     <AuthProvider>
 <ScanProvider>
       <Router>
+        <OfflineBlocker />
         <GlobalScanListener />
         <Helmet>
           <title>Franquify ERP - Sistema de Gestión de Franquicias</title>
