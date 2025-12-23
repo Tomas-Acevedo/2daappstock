@@ -87,7 +87,6 @@ export default function ScanDialog() {
 
   const handleClose = () => { close(); setSaleQty(1); setAmountReceived(0); setActiveTab("sale"); setViewProduct(null); };
 
-  // Totales dinámicos
   const subtotal = useMemo(() => cart.reduce((acc, it) => acc + (it.price * it.quantity), 0), [cart]);
   const discountPercent = selectedPaymentMethod ? Number(selectedPaymentMethod.discount_percentage || 0) : 0;
   const discountAmount = (subtotal * discountPercent) / 100;
@@ -144,34 +143,34 @@ export default function ScanDialog() {
 
   return (
     <Dialog open={isOpen} onOpenChange={(o) => !o && handleClose()}>
-      <DialogContent className="max-w-5xl bg-white p-0 overflow-hidden shadow-2xl border-none">
+      <DialogContent className="max-w-5xl bg-white p-0 overflow-hidden shadow-2xl border-none flex flex-col max-h-[95vh] w-[95vw]">
         <DialogHeader className="hidden"><DialogTitle>Escaneo</DialogTitle></DialogHeader>
         
-        <div className="p-6 border-b border-gray-100 flex justify-between items-center bg-gray-50/50">
+        <div className="p-4 md:p-6 border-b border-gray-100 flex justify-between items-center bg-gray-50/50 shrink-0">
           <div className="flex items-center gap-4">
-            <div className="p-2.5 bg-indigo-600 rounded-xl shadow-md"><Barcode className="w-6 h-6 text-white" /></div>
+            <div className="p-2 bg-indigo-600 rounded-xl shadow-md"><Barcode className="w-5 h-5 md:w-6 md:h-6 text-white" /></div>
             <div>
-              <h2 className="text-xs font-bold text-indigo-600 uppercase tracking-widest mb-0.5">Torre de Control</h2>
-              <p className="text-2xl font-black text-gray-900 tracking-tight">ESCANEADO: <span className="text-indigo-600 font-mono">{barcode}</span></p>
+              <h2 className="text-[10px] font-bold text-indigo-600 uppercase tracking-widest mb-0.5">Torre de Control</h2>
+              <p className="text-xl md:text-2xl font-black text-gray-900 tracking-tight">ESCANEADO: <span className="text-indigo-600 font-mono">{barcode}</span></p>
             </div>
           </div>
-          {cart.length > 0 && <div className="flex items-center gap-2 bg-amber-50 px-4 py-2 rounded-xl border border-amber-100 mr-10"><ShoppingCart className="w-4 h-4 text-amber-600" /><span className="font-black text-amber-600 uppercase text-[10px]">{cart.length} productos</span></div>}
+          {cart.length > 0 && <div className="hidden md:flex items-center gap-2 bg-amber-50 px-4 py-2 rounded-xl border border-amber-100 mr-10"><ShoppingCart className="w-4 h-4 text-amber-600" /><span className="font-black text-amber-600 uppercase text-[10px]">{cart.length} productos</span></div>}
         </div>
 
-        <div className="p-8 min-h-[500px] bg-white">
+        <div className="flex-1 overflow-y-auto p-4 md:p-8 bg-white custom-scrollbar">
           {loading || loadingData ? (
             <div className="h-64 flex flex-col items-center justify-center gap-4"><Loader2 className="w-12 h-12 animate-spin text-indigo-600" /></div>
           ) : viewProduct ? (
             <div className="space-y-6">
-              <div className="flex justify-center gap-2 mb-4 bg-gray-100 p-1 rounded-2xl w-fit mx-auto">
-                <button onClick={() => setActiveTab("sale")} className={`px-6 py-2 rounded-xl text-xs font-black transition-all ${activeTab === "sale" ? "bg-white text-indigo-600 shadow-sm" : "text-gray-500"}`}>VENDER</button>
-                <button onClick={() => setActiveTab("edit")} className={`px-6 py-2 rounded-xl text-xs font-black transition-all ${activeTab === "edit" ? "bg-white text-indigo-600 shadow-sm" : "text-gray-500"}`}>EDITAR INFO</button>
-                <button onClick={() => setActiveTab("cart")} className={`px-6 py-2 rounded-xl text-xs font-black transition-all ${activeTab === "cart" ? "bg-white text-indigo-600 shadow-sm" : "text-gray-500"}`}>CARRITO ({cart.length})</button>
+              <div className="flex justify-center gap-1 md:gap-2 mb-4 bg-gray-100 p-1 rounded-2xl w-fit mx-auto sticky top-0 z-10">
+                <button onClick={() => setActiveTab("sale")} className={`px-4 md:px-6 py-2 rounded-xl text-[10px] md:text-xs font-black transition-all ${activeTab === "sale" ? "bg-white text-indigo-600 shadow-sm" : "text-gray-500"}`}>VENDER</button>
+                <button onClick={() => setActiveTab("edit")} className={`px-4 md:px-6 py-2 rounded-xl text-[10px] md:text-xs font-black transition-all ${activeTab === "edit" ? "bg-white text-indigo-600 shadow-sm" : "text-gray-500"}`}>EDITAR INFO</button>
+                <button onClick={() => setActiveTab("cart")} className={`px-4 md:px-6 py-2 rounded-xl text-[10px] md:text-xs font-black transition-all ${activeTab === "cart" ? "bg-white text-indigo-600 shadow-sm" : "text-gray-500"}`}>CARRITO ({cart.length})</button>
               </div>
 
               {activeTab === "sale" && (
                 <div className="text-center max-w-xl mx-auto space-y-6 animate-in zoom-in-95 duration-200">
-                  <h3 className="text-4xl font-black text-gray-900 tracking-tight">{viewProduct.name}</h3>
+                  <h3 className="text-3xl md:text-4xl font-black text-gray-900 tracking-tight">{viewProduct.name}</h3>
                   <div className="grid grid-cols-2 gap-4">
                     <div className={`p-4 rounded-2xl border ${viewProduct.stock <= 0 ? 'bg-red-50 border-red-100' : 'bg-gray-50 border-gray-100'}`}><p className="text-[10px] font-black text-gray-400 uppercase">Stock</p><p className={`text-xl font-bold ${viewProduct.stock <= 0 ? 'text-red-600' : 'text-gray-900'}`}>{viewProduct.stock} U.</p></div>
                     <div className="bg-indigo-50 p-4 rounded-2xl border border-indigo-100"><p className="text-[10px] font-black text-indigo-400 uppercase">Precio</p><p className="text-xl font-bold text-indigo-600">{formatCurrency(viewProduct.price)}</p></div>
@@ -191,36 +190,74 @@ export default function ScanDialog() {
               )}
 
               {activeTab === "cart" && (
-                <div className="max-w-3xl mx-auto space-y-6 animate-in fade-in duration-300">
-                  <div className="border rounded-2xl overflow-hidden shadow-sm">
-                    <table className="w-full text-sm">
-                      <thead className="bg-gray-50 font-black text-[10px] uppercase text-gray-400">
-                        <tr><th className="p-4 text-left">Producto</th><th className="p-4 text-center">Cant.</th><th className="p-4 text-right">Subtotal</th><th className="p-4"></th></tr>
-                      </thead>
-                      <tbody className="divide-y divide-gray-100">
-                        {cart.map(item => (
-                          <tr key={item.id}>
-                            <td className="p-4 font-bold">{item.name}</td>
-                            <td className="p-4">
-                              <div className="flex items-center justify-center gap-2 bg-gray-100 rounded-lg p-1 w-fit mx-auto">
-                                <button onClick={() => updateCartQty(item.id, item.quantity - 1)} className="p-1.5 hover:bg-white rounded transition-all" disabled={item.quantity <= 1}><Minus className="w-3 h-3 text-gray-500"/></button>
-                                <span className="font-black text-sm w-6 text-center">{item.quantity}</span>
-                                <button onClick={() => { if(item.quantity >= item.stock) { toast({title:"Stock máximo", variant:"destructive"}); return; } updateCartQty(item.id, item.quantity + 1); }} className="p-1.5 hover:bg-white rounded transition-all"><Plus className="w-3 h-3 text-gray-500"/></button>
-                              </div>
-                            </td>
-                            <td className="p-4 text-right font-black">{formatCurrency(item.price * item.quantity)}</td>
-                            <td className="p-4 text-right"><Button variant="ghost" size="icon" onClick={() => removeFromCart(item.id)}><Trash2 className="w-4 h-4 text-red-400"/></Button></td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                  <div className="space-y-4 bg-gray-50 p-6 rounded-[32px] border border-gray-100">
-                    <div className="grid grid-cols-2 gap-4">
-                      <div className="space-y-2"><label className="text-[10px] font-black uppercase text-gray-400">Pago</label><div className="grid grid-cols-1 gap-2">{paymentMethods.map(method => (<Button key={method.id} variant={selectedPaymentMethod?.id === method.id ? "default" : "outline"} onClick={() => setSelectedPaymentMethod(method)} className={`h-auto py-3 px-4 flex justify-between items-center rounded-xl border-2 transition-all ${selectedPaymentMethod?.id === method.id ? 'bg-indigo-600 border-indigo-600 text-white' : 'bg-white border-gray-100'}`}><span className="font-bold text-xs">{method.name}</span>{method.discount_percentage > 0 && <span className={`text-[9px] px-1.5 py-0.5 rounded-full font-black ${selectedPaymentMethod?.id === method.id ? 'bg-white text-indigo-600' : 'bg-green-100 text-green-600'}`}>-{method.discount_percentage}%</span>}</Button>))}</div></div>
-                      <div className="space-y-2"><label className="text-[10px] font-black uppercase text-gray-400">Calculadora</label><div className="bg-white p-4 rounded-xl border border-gray-200 space-y-3"><div className="relative"><Banknote className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" /><Input type="number" placeholder="Paga con..." className="pl-9 bg-gray-50 border-none font-bold" value={amountReceived || ''} onFocus={e => e.target.select()} onChange={e => setAmountReceived(Number(e.target.value))} /></div>{amountReceived > 0 && <div className="flex justify-between items-center pt-2 border-t border-dashed"><span className="text-[10px] font-black text-gray-400 uppercase">Vuelto:</span><span className="text-lg font-black text-green-600">{formatCurrency(changeAmount)}</span></div>}</div></div>
+                <div className="max-w-4xl mx-auto space-y-6 animate-in fade-in duration-300">
+                  <div className="border rounded-2xl overflow-hidden shadow-sm bg-white">
+                    <div className="max-h-[300px] overflow-y-auto custom-scrollbar">
+                      <table className="w-full text-sm">
+                        <thead className="bg-gray-50 font-black text-[10px] uppercase text-gray-400 sticky top-0 z-10">
+                          <tr><th className="p-4 text-left">Producto</th><th className="p-4 text-center">Cant.</th><th className="p-4 text-right">Subtotal</th><th className="p-4"></th></tr>
+                        </thead>
+                        <tbody className="divide-y divide-gray-100">
+                          {cart.length === 0 ? (
+                            <tr><td colSpan="4" className="p-10 text-center text-gray-400 font-bold">El carrito está vacío</td></tr>
+                          ) : cart.map(item => (
+                            <tr key={item.id}>
+                              <td className="p-4 font-bold max-w-[200px] truncate">{item.name}</td>
+                              <td className="p-4">
+                                <div className="flex items-center justify-center gap-2 bg-gray-100 rounded-lg p-1 w-fit mx-auto">
+                                  <button onClick={() => updateCartQty(item.id, item.quantity - 1)} className="p-1.5 hover:bg-white rounded transition-all" disabled={item.quantity <= 1}><Minus className="w-3 h-3 text-gray-500"/></button>
+                                  <span className="font-black text-sm w-6 text-center">{item.quantity}</span>
+                                  <button onClick={() => { if(item.quantity >= item.stock) { toast({title:"Stock máximo", variant:"destructive"}); return; } updateCartQty(item.id, item.quantity + 1); }} className="p-1.5 hover:bg-white rounded transition-all"><Plus className="w-3 h-3 text-gray-500"/></button>
+                                </div>
+                              </td>
+                              <td className="p-4 text-right font-black">{formatCurrency(item.price * item.quantity)}</td>
+                              <td className="p-4 text-right"><Button variant="ghost" size="icon" onClick={() => removeFromCart(item.id)}><Trash2 className="w-4 h-4 text-red-400"/></Button></td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
                     </div>
-                    <div className="pt-4 border-t border-gray-200 flex justify-between items-end px-2"><div><p className="text-[10px] font-black uppercase text-gray-400">Total Venta</p><p className="text-5xl font-black text-indigo-700">{formatCurrency(cartTotal)}</p></div><Button onClick={handleFinalizeSale} disabled={isProcessing || cart.length === 0} className="px-10 py-9 rounded-2xl bg-emerald-600 text-lg font-black shadow-lg">FINALIZAR</Button></div>
+                  </div>
+
+                  <div className="space-y-4 bg-gray-50 p-4 md:p-6 rounded-[24px] md:rounded-[32px] border border-gray-100">
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                      <div className="space-y-2">
+                        <label className="text-[10px] font-black uppercase text-gray-400">Método de Pago</label>
+                        <div className="grid grid-cols-2 gap-2">
+                          {paymentMethods.map(method => (
+                            <Button key={method.id} variant={selectedPaymentMethod?.id === method.id ? "default" : "outline"} onClick={() => setSelectedPaymentMethod(method)} className={`h-auto py-2.5 px-3 flex justify-between items-center rounded-xl border-2 transition-all ${selectedPaymentMethod?.id === method.id ? 'bg-indigo-600 border-indigo-600 text-white shadow-md' : 'bg-white border-gray-100'}`}>
+                              <span className="font-bold text-[10px] truncate mr-1">{method.name}</span>
+                              {method.discount_percentage > 0 && <span className={`text-[8px] px-1 py-0.5 rounded-full font-black ${selectedPaymentMethod?.id === method.id ? 'bg-white text-indigo-600' : 'bg-green-100 text-green-600'}`}>-{method.discount_percentage}%</span>}
+                            </Button>
+                          ))}
+                        </div>
+                      </div>
+                      <div className="space-y-2">
+                        <label className="text-[10px] font-black uppercase text-gray-400">Calculadora de Vuelto</label>
+                        <div className="bg-white p-4 rounded-xl border border-gray-200 space-y-3 shadow-sm">
+                          <div className="relative">
+                            <Banknote className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+                            <Input type="number" placeholder="Paga con..." className="pl-9 bg-gray-50 border-none font-bold" value={amountReceived || ''} onFocus={e => e.target.select()} onChange={e => setAmountReceived(Number(e.target.value))} />
+                          </div>
+                          {amountReceived > 0 && (
+                            <div className="flex justify-between items-center pt-2 border-t border-dashed">
+                              <span className="text-[10px] font-black text-gray-400 uppercase">Vuelto:</span>
+                              <span className="text-lg font-black text-green-600">{formatCurrency(changeAmount)}</span>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="pt-4 border-t border-gray-200 flex flex-col sm:flex-row justify-between items-center gap-4 px-2">
+                      <div className="text-center sm:text-left">
+                        <p className="text-[10px] font-black uppercase text-gray-400">Total Venta</p>
+                        <p className="text-4xl md:text-5xl font-black text-indigo-700">{formatCurrency(cartTotal)}</p>
+                      </div>
+                      <Button onClick={handleFinalizeSale} disabled={isProcessing || cart.length === 0} className="w-full sm:w-auto px-12 py-8 rounded-2xl bg-emerald-600 hover:bg-emerald-700 text-lg font-black shadow-lg transition-all active:scale-95">
+                        {isProcessing ? <Loader2 className="w-6 h-6 animate-spin" /> : "FINALIZAR VENTA"}
+                      </Button>
+                    </div>
                   </div>
                 </div>
               )}

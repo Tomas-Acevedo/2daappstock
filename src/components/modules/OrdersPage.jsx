@@ -31,6 +31,9 @@ const OrdersPage = () => {
   const [summary, setSummary] = useState({ pendingARS: 0, pendingUSD: 0 });
   const itemsPerPage = 15;
 
+  // Estado para el buscador de productos dentro del modal
+  const [productSearch, setProductSearch] = useState('');
+
   const [orderForm, setOrderForm] = useState({
     client_name: '', products: [], custom_products: [], 
     currency: 'ARS', paid_amount: 0, order_date: getArgentinaDate(), notes: '' 
@@ -39,6 +42,13 @@ const OrdersPage = () => {
   const [selectedProduct, setSelectedProduct] = useState('');
   const [selectedQty, setSelectedQty] = useState(1);
   const [customProductForm, setCustomProductForm] = useState({ name: '', price: 0, quantity: 1 });
+
+  // Filtrado dinámico de productos para el selector
+  const filteredInventoryProducts = useMemo(() => {
+    return products.filter(p => 
+      p.name.toLowerCase().includes(productSearch.toLowerCase())
+    );
+  }, [products, productSearch]);
 
   const fetchOrders = useCallback(async () => {
     setLoading(true);
@@ -122,7 +132,7 @@ const OrdersPage = () => {
     const prod = products.find(p => p.id === selectedProduct);
     if (prod) {
       setOrderForm(prev => ({ ...prev, products: [...prev.products, { id: prod.id, name: prod.name, price: prod.price, quantity: Number(selectedQty), type: 'stock' }] }));
-      setSelectedProduct(''); setSelectedQty(1);
+      setSelectedProduct(''); setSelectedQty(1); setProductSearch('');
     }
   };
 
@@ -169,6 +179,7 @@ const OrdersPage = () => {
 
   const resetForm = () => {
     setEditingOrder(null);
+    setProductSearch('');
     setOrderForm({ client_name: '', products: [], custom_products: [], currency: 'ARS', paid_amount: 0, order_date: getArgentinaDate(), notes: '' });
   };
 
@@ -224,16 +235,38 @@ const OrdersPage = () => {
               </div>
               <div className="space-y-2"><label className="text-xs font-black uppercase text-gray-400 ml-1">Notas</label><textarea value={orderForm.notes} onChange={e => setOrderForm({...orderForm, notes: e.target.value})} placeholder="Detalles extra..." className="w-full min-h-[80px] rounded-xl border border-input p-3 text-sm focus:ring-2 focus:ring-indigo-500 outline-none" /></div>
 
-              {/* Inventario */}
+              {/* Inventario con Buscador */}
               <div className="space-y-4 border rounded-2xl p-5 bg-gray-50/50 border-gray-100">
                 <h3 className="font-bold text-xs flex items-center gap-2 text-indigo-600 uppercase tracking-widest"><Package className="w-4 h-4" /> Desde Inventario</h3>
-                <div className="flex gap-2">
-                  <select className="flex h-12 w-full rounded-xl border border-input bg-white px-3 py-2 text-sm font-bold focus:ring-2 focus:ring-indigo-500" value={selectedProduct} onChange={e => setSelectedProduct(e.target.value)}>
-                    <option value="">Seleccionar...</option>
-                    {products.map(p => (<option key={p.id} value={p.id}>{p.name} - {formatCurrency(p.price)}</option>))}
-                  </select>
-                  <Input type="number" className="w-24 h-12 rounded-xl font-bold" min="1" value={selectedQty} onFocus={e => e.target.select()} onChange={e => setSelectedQty(e.target.value)} />
-                  <Button onClick={handleAddStockProduct} type="button" variant="secondary" className="h-12 rounded-xl px-6 font-bold">Sumar</Button>
+                <div className="space-y-3">
+                  {/* Buscador de productos */}
+                  <div className="relative">
+                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
+                    <Input 
+                      placeholder="Buscar producto..." 
+                      className="pl-9 rounded-xl h-10 border-gray-200 bg-white" 
+                      value={productSearch}
+                      onChange={e => setProductSearch(e.target.value)}
+                    />
+                  </div>
+                  
+                  <div className="flex gap-2">
+                    <select 
+                      className="flex h-12 w-full rounded-xl border border-input bg-white px-3 py-2 text-sm font-bold focus:ring-2 focus:ring-indigo-500" 
+                      value={selectedProduct} 
+                      onChange={e => setSelectedProduct(e.target.value)}
+                    >
+                      <option value="">{filteredInventoryProducts.length > 0 ? 'Seleccionar producto...' : 'No se encontraron resultados'}</option>
+                      {filteredInventoryProducts.map(p => (
+                        <option key={p.id} value={p.id}>{p.name} - {formatCurrency(p.price)}</option>
+                      ))}
+                    </select>
+                    <Input type="number" className="w-24 h-12 rounded-xl font-bold" min="1" value={selectedQty} onFocus={e => e.target.select()} onChange={e => setSelectedQty(e.target.value)} />
+                    <Button onClick={handleAddStockProduct} type="button" variant="secondary" className="h-12 rounded-xl px-6 font-bold">Sumar</Button>
+                  </div>
+                  {productSearch && (
+                    <p className="text-[10px] text-gray-400 italic ml-1">Mostrando {filteredInventoryProducts.length} de {products.length} productos.</p>
+                  )}
                 </div>
               </div>
 
@@ -326,7 +359,7 @@ const OrdersPage = () => {
                         <div className="flex flex-col items-end leading-tight mb-2"><span className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">TOTAL</span><span className="text-4xl font-black text-gray-900 tracking-tighter">{symbol}{Number(order.total_amount).toLocaleString('es-AR')}</span></div>
                         <div className="flex gap-4 justify-end items-center text-[11px] font-bold uppercase tracking-widest">
                            <div className="flex gap-1.5 items-center"><span className="text-green-600 opacity-60">PAGADO</span><span className="text-green-600 text-sm font-black">{symbol}{Number(order.paid_amount).toLocaleString('es-AR')}</span></div>
-                           <div className="flex gap-1.5 items-center"><span className="text-red-600 opacity-60">SALDO</span><span className="text-red-600 text-sm font-black">{symbol}{Number(order.pending_amount).toLocaleString('es-AR')}</span></div>
+                           <div className="flex gap-1.5 items-center"><span className="text-red-600 opacity-60">RESTANTE</span><span className="text-red-600 text-sm font-black">{symbol}{Number(order.pending_amount).toLocaleString('es-AR')}</span></div>
                         </div>
                       </div>
                       <div className="flex gap-2">
@@ -374,7 +407,7 @@ const OrdersPage = () => {
                 <div className="text-4xl font-black text-indigo-900 tracking-tighter">{selectedOrder.currency === 'USD' ? 'US$' : '$'}{Number(selectedOrder.total_amount).toLocaleString('es-AR')}</div>
                 <div className="flex gap-4 pt-2 border-t border-indigo-100 w-full justify-end uppercase text-[9px] font-black tracking-widest">
                    <div className="text-right text-green-600"><p className="opacity-60">Pagado</p><p className="text-base font-black">{selectedOrder.currency === 'USD' ? 'US$' : '$'}{Number(selectedOrder.paid_amount).toLocaleString('es-AR')}</p></div>
-                   <div className="text-right text-red-600"><p className="opacity-60">Saldo</p><p className="text-base font-black">{selectedOrder.currency === 'USD' ? 'US$' : '$'}{Number(selectedOrder.pending_amount).toLocaleString('es-AR')}</p></div>
+                   <div className="text-right text-red-600"><p className="opacity-60">Restamte</p><p className="text-base font-black">{selectedOrder.currency === 'USD' ? 'US$' : '$'}{Number(selectedOrder.pending_amount).toLocaleString('es-AR')}</p></div>
                 </div>
               </div>
             </div>
