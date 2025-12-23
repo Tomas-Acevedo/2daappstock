@@ -31,6 +31,12 @@ const CashRegister = () => {
   const [openingBalance, setOpeningBalance] = useState(0);
   const [expenseForm, setExpenseForm] = useState({ amount: 0, description: '' });
 
+  const formatDateDMY = (dateStr) => {
+  const [year, month, day] = dateStr.split("-");
+  return `${day}/${month}/${year}`;
+};
+
+
   const getDayRange = (dateString) => {
     return {
       start: `${dateString}T00:00:00-03:00`,
@@ -121,7 +127,10 @@ const CashRegister = () => {
         ) : (
           <div className="flex items-center gap-2 bg-indigo-50 border border-indigo-100 p-2.5 rounded-xl text-indigo-600">
             <Clock className="w-4 h-4" />
-            <span className="text-sm font-bold uppercase">Jornada Actual ({selectedDate})</span>
+            <span className="text-sm font-bold uppercase">
+  Jornada Actual ({formatDateDMY(selectedDate)})
+</span>
+
           </div>
         )}
       </div>
@@ -131,7 +140,10 @@ const CashRegister = () => {
           <Calendar className="w-12 h-12 text-gray-300 mx-auto mb-4" />
           <h2 className="text-xl font-semibold text-gray-900 mb-2">No hay registros para este día</h2>
           {(selectedDate === getArgentinaDate() || isOwner) ? (
-            <Button onClick={() => setIsStartDialogOpen(true)} className="bg-green-600 mt-4">Abrir Caja en {selectedDate}</Button>
+            <Button onClick={() => setIsStartDialogOpen(true)} className="bg-green-600 mt-4">
+  {formatDateDMY(selectedDate)} Abrir Caja
+</Button>
+
           ) : <p className="text-amber-600 font-medium mt-4">Solo puedes operar la caja del día actual.</p>}
         </div>
       ) : (

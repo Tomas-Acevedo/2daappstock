@@ -16,7 +16,7 @@ const Sidebar = ({ onClose }) => {
   const role = user?.profile?.role;
 
   const ownerMenuItems = [
-    { icon: LayoutDashboard, label: 'Dashboard', path: '' },
+    { icon: LayoutDashboard, label: 'Estadísticas', path: '' },
     { icon: ShoppingCart, label: 'Ventas', path: 'sales' },
     { icon: ClipboardList, label: 'Pedidos', path: 'orders' },
     { icon: Package, label: 'Inventario', path: 'inventory' },

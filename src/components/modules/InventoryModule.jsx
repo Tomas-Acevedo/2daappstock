@@ -41,12 +41,22 @@ const InventoryModule = () => {
   const [isCategoryDialogOpen, setIsCategoryDialogOpen] = useState(false);
   const [editingItem, setEditingItem] = useState(null);
 
+  // ✅ COSTO ELIMINADO DEFINITIVAMENTE
   const [productForm, setProductForm] = useState({ 
-    name: '', category_id: '', cost: 0, price: 0, stock: 0, barcode: '' 
+    name: '', category_id: '', price: 0, stock: 0, barcode: '' 
   });
   const [categoryForm, setCategoryForm] = useState({ name: '' });
 
-  // ✅ FETCH OPTIMIZADO DE PRODUCTOS (SOLO TRAE 20)
+  // Funciones auxiliares para el formato visual 3.000 en el input
+  const formatNumberWithDots = (num) => {
+    if (num === undefined || num === null || num === '') return '';
+    return num.toString().replace(/\D/g, "").replace(/\B(?=(\d{3})+(?!\d))/g, ".");
+  };
+
+  const parseNumberFromDots = (str) => {
+    return Number(str.replace(/\./g, ""));
+  };
+
   const fetchProducts = useCallback(async () => {
     if (activeTab !== 'products') return;
     setLoading(true);
@@ -56,22 +66,19 @@ const InventoryModule = () => {
 
     let query = supabase
       .from('products')
-      .select('*', { count: 'exact' }) // Conteo exacto en el servidor
+      .select('*', { count: 'exact' })
       .eq('branch_id', branchId)
       .order('name', { ascending: true })
       .range(from, to);
 
-    // Filtro de búsqueda en servidor
     if (filter) {
       query = query.or(`name.ilike.%${filter}%,barcode.ilike.%${filter}%`);
     }
 
-    // Filtro de categoría en servidor
     if (categoryFilter !== 'all') {
       query = query.eq('category_id', categoryFilter);
     }
 
-    // Filtro de stock en servidor
     if (stockFilter === 'in-stock') {
       query = query.gt('stock', 0);
     } else if (stockFilter === 'no-stock') {
@@ -87,7 +94,6 @@ const InventoryModule = () => {
     setLoading(false);
   }, [branchId, currentPage, filter, categoryFilter, stockFilter, activeTab]);
 
-  // Carga inicial de categorías y configuración
   useEffect(() => {
     const loadInitialData = async () => {
       const [configRes, catsRes] = await Promise.all([
@@ -100,19 +106,16 @@ const InventoryModule = () => {
     if (branchId) loadInitialData();
   }, [branchId]);
 
-  // Ejecutar fetch de productos cuando cambian los parámetros
   useEffect(() => {
     fetchProducts();
   }, [fetchProducts]);
 
-  // Escuchar refrescos externos
   useEffect(() => {
     const handleRefresh = () => fetchProducts();
     window.addEventListener('inventory:refresh', handleRefresh);
     return () => window.removeEventListener('inventory:refresh', handleRefresh);
   }, [fetchProducts]);
 
-  // Resetear página al filtrar
   useEffect(() => {
     setCurrentPage(1);
   }, [filter, categoryFilter, stockFilter]);
@@ -120,7 +123,6 @@ const InventoryModule = () => {
   const isOwner = user?.profile?.role === 'owner';
   const canEdit = isOwner || (branchConfig?.allow_stock_edit === true);
 
-  // Lógica de Categorías (se mantiene en memoria porque suelen ser pocas)
   const filteredCategories = categories.filter(c => 
     c.name.toLowerCase().includes(filter.toLowerCase())
   );
@@ -152,7 +154,7 @@ const InventoryModule = () => {
       const { data } = await supabase.from('categories').select('*').eq('branch_id', branchId).order('name');
       setCategories(data || []);
       setIsCategoryDialogOpen(false);
-    } catch (err) { toast({ title: "Error", variant: "destructive" }); }
+    } catch (err) { toast({ title: "Error" }); }
   };
 
   const handleDeleteProduct = async (id) => {
@@ -164,10 +166,16 @@ const InventoryModule = () => {
   const openProductDialog = (product = null) => {
     if (product) {
       setEditingItem(product);
-      setProductForm({ ...product, barcode: product.barcode || '' });
+      setProductForm({ 
+        name: product.name, 
+        category_id: product.category_id, 
+        price: product.price, 
+        stock: product.stock, 
+        barcode: product.barcode || '' 
+      });
     } else {
       setEditingItem(null);
-      setProductForm({ name: '', category_id: categories[0]?.id || '', cost: 0, price: 0, stock: 0, barcode: '' });
+      setProductForm({ name: '', category_id: categories[0]?.id || '', price: 0, stock: 0, barcode: '' });
     }
     setIsProductDialogOpen(true);
   };
@@ -181,18 +189,14 @@ const InventoryModule = () => {
           <h1 className="text-3xl font-black text-gray-900 tracking-tight">Gestión de Stock</h1>
           {!canEdit && !loading && (
             <p className="text-amber-600 text-sm font-semibold flex items-center gap-1.5 bg-amber-50 px-3 py-1.5 rounded-lg border border-amber-100 mt-1">
-              <ShieldCheck className="w-4 h-4"/> Modo Lectura Habilitado
+              <ShieldCheck className="w-4 h-4"/> Modo Lectura
             </p>
           )}
         </div>
         
         <div className="flex bg-gray-100 p-1 rounded-xl w-full md:w-auto">
-          <button onClick={() => setActiveTab('products')} className={`flex-1 md:flex-none px-4 py-2 rounded-lg text-xs font-black transition-all flex items-center justify-center gap-2 ${activeTab === 'products' ? 'bg-white shadow-sm text-indigo-600' : 'text-gray-500'}`}>
-            <Package className="w-4 h-4" /> PRODUCTOS
-          </button>
-          <button onClick={() => setActiveTab('categories')} className={`flex-1 md:flex-none px-4 py-2 rounded-lg text-xs font-black transition-all flex items-center justify-center gap-2 ${activeTab === 'categories' ? 'bg-white shadow-sm text-indigo-600' : 'text-gray-500'}`}>
-            <Layers className="w-4 h-4" /> CATEGORÍAS
-          </button>
+          <button onClick={() => setActiveTab('products')} className={`flex-1 md:flex-none px-4 py-2 rounded-lg text-xs font-black transition-all flex items-center justify-center gap-2 ${activeTab === 'products' ? 'bg-white shadow-sm text-indigo-600' : 'text-gray-500'}`}><Package className="w-4 h-4" /> PRODUCTOS</button>
+          <button onClick={() => setActiveTab('categories')} className={`flex-1 md:flex-none px-4 py-2 rounded-lg text-xs font-black transition-all flex items-center justify-center gap-2 ${activeTab === 'categories' ? 'bg-white shadow-sm text-indigo-600' : 'text-gray-500'}`}><Layers className="w-4 h-4" /> CATEGORÍAS</button>
         </div>
       </div>
 
@@ -211,22 +215,13 @@ const InventoryModule = () => {
           <div className="flex flex-wrap gap-2">
             <div className="flex items-center gap-2 bg-white px-3 py-1 rounded-2xl border border-gray-200 shadow-sm">
               <Filter className="w-4 h-4 text-gray-400" />
-              <select 
-                className="bg-transparent border-none text-xs font-bold outline-none text-gray-600 cursor-pointer py-2"
-                value={categoryFilter}
-                onChange={(e) => setCategoryFilter(e.target.value)}
-              >
+              <select className="bg-transparent border-none text-xs font-bold outline-none text-gray-600 py-2 cursor-pointer" value={categoryFilter} onChange={(e) => setCategoryFilter(e.target.value)}>
                 <option value="all">Todas las Categorías</option>
                 {categories.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
               </select>
             </div>
-
             <div className="flex items-center gap-2 bg-white px-3 py-1 rounded-2xl border border-gray-200 shadow-sm">
-              <select 
-                className="bg-transparent border-none text-xs font-bold outline-none text-gray-600 cursor-pointer py-2"
-                value={stockFilter}
-                onChange={(e) => setStockFilter(e.target.value)}
-              >
+              <select className="bg-transparent border-none text-xs font-bold outline-none text-gray-600 py-2 cursor-pointer" value={stockFilter} onChange={(e) => setStockFilter(e.target.value)}>
                 <option value="all">Todo el Stock</option>
                 <option value="in-stock">Con Stock</option>
                 <option value="no-stock">Sin Stock (0)</option>
@@ -236,9 +231,7 @@ const InventoryModule = () => {
         )}
 
         {canEdit && (
-          <Button onClick={() => activeTab === 'products' ? openProductDialog() : setIsCategoryDialogOpen(true)} className="bg-indigo-600 hover:bg-indigo-700 text-white font-black py-6 rounded-2xl px-8 shadow-lg shadow-indigo-100">
-            <Plus className="w-4 h-4 mr-2" /> NUEVO {activeTab === 'products' ? 'PRODUCTO' : 'CATEGORÍA'}
-          </Button>
+          <Button onClick={() => activeTab === 'products' ? openProductDialog() : setIsCategoryDialogOpen(true)} className="bg-indigo-600 hover:bg-indigo-700 text-white font-black py-6 rounded-2xl px-8 shadow-lg shadow-indigo-100 uppercase text-xs tracking-widest"><Plus className="w-4 h-4 mr-2" /> Nuevo {activeTab === 'products' ? 'Producto' : 'Categoría'}</Button>
         )}
       </div>
 
@@ -280,7 +273,6 @@ const InventoryModule = () => {
             </tbody>
           </table>
           
-          {/* ✅ PAGINACIÓN OPTIMIZADA */}
           {!loading && activeTab === 'products' && totalPages > 1 && (
             <div className="p-4 border-t border-gray-100 flex justify-between items-center bg-gray-50/30">
               <p className="text-xs font-bold text-gray-500 uppercase tracking-tighter">Total: {totalCount} productos</p>
@@ -294,27 +286,53 @@ const InventoryModule = () => {
         </div>
       </div>
 
-      {/* Modales */}
       <Dialog open={isProductDialogOpen} onOpenChange={setIsProductDialogOpen}>
-        <DialogContent className="bg-white sm:max-w-md rounded-2xl">
+        <DialogContent className="bg-white sm:max-w-md rounded-2xl shadow-2xl">
           <DialogHeader><DialogTitle className="text-xl font-black">Gestionar Producto</DialogTitle></DialogHeader>
           <div className="grid gap-4 py-4">
-            <div className="grid gap-2"><label className="text-xs font-bold uppercase text-gray-500">Código</label><Input value={productForm.barcode} onChange={e => setProductForm({...productForm, barcode: e.target.value})} placeholder="Opcional" className="rounded-xl" /></div>
-            <div className="grid gap-2"><label className="text-xs font-bold uppercase text-gray-500">Nombre</label><Input value={productForm.name} onChange={e => setProductForm({...productForm, name: e.target.value})} className="rounded-xl" /></div>
+            <div className="grid gap-2"><label className="text-xs font-bold uppercase text-gray-400">Código</label><Input value={productForm.barcode} onChange={e => setProductForm({...productForm, barcode: e.target.value})} placeholder="Opcional" className="rounded-xl" /></div>
+            <div className="grid gap-2"><label className="text-xs font-bold uppercase text-gray-400">Nombre</label><Input value={productForm.name} onChange={e => setProductForm({...productForm, name: e.target.value})} className="rounded-xl" /></div>
             <div className="grid gap-2">
-              <label className="text-xs font-bold uppercase text-gray-500">Categoría</label>
+              <label className="text-xs font-bold uppercase text-gray-400">Categoría</label>
               <select className="w-full p-2.5 text-sm border border-gray-200 rounded-xl bg-gray-50 outline-none focus:ring-2 focus:ring-indigo-500" value={productForm.category_id} onChange={e => setProductForm({...productForm, category_id: e.target.value})}>
                 <option value="">Seleccionar...</option>
                 {categories.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
               </select>
             </div>
-            <div className="grid grid-cols-3 gap-3">
-              <div className="space-y-1.5"><label className="text-[10px] font-bold text-gray-400 uppercase">Costo</label><Input type="number" value={productForm.cost} onFocus={e => e.target.select()} onChange={e => setProductForm({...productForm, cost: Number(e.target.value)})} /></div>
-              <div className="space-y-1.5"><label className="text-[10px] font-bold text-indigo-400 uppercase">Venta</label><Input type="number" value={productForm.price} onFocus={e => e.target.select()} onChange={e => setProductForm({...productForm, price: Number(e.target.value)})} className="border-indigo-100 bg-indigo-50/30 font-bold text-indigo-700" /></div>
-              <div className="space-y-1.5"><label className="text-[10px] font-bold text-gray-400 uppercase">Stock</label><Input type="number" value={productForm.stock} onFocus={e => e.target.select()} onChange={e => setProductForm({...productForm, stock: Number(e.target.value)})} /></div>
+            
+            <div className="grid grid-cols-2 gap-3">
+              {/* ✅ PRECIO CON FORMATO DE PUNTOS DINÁMICO */}
+              <div className="space-y-1.5">
+                <label className="text-[10px] font-bold text-indigo-400 uppercase">Precio</label>
+                <Input 
+                  type="text" 
+                  value={formatNumberWithDots(productForm.price)} 
+                  onFocus={e => e.target.select()} 
+                  onChange={e => setProductForm({...productForm, price: parseNumberFromDots(e.target.value)})} 
+                  className="border-indigo-100 bg-indigo-50/30 font-bold text-indigo-700 rounded-xl" 
+                />
+              </div>
+              <div className="space-y-1.5">
+                <label className="text-[10px] font-bold text-gray-400 uppercase">Stock</label>
+                <Input 
+                  type="number" 
+                  value={productForm.stock} 
+                  onFocus={e => e.target.select()} 
+                  onChange={e => setProductForm({...productForm, stock: Number(e.target.value)})} 
+                  className="rounded-xl"
+                />
+              </div>
             </div>
           </div>
           <DialogFooter><Button onClick={handleSaveProduct} className="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-black py-6 rounded-xl uppercase text-xs">Guardar Cambios</Button></DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={isCategoryDialogOpen} onOpenChange={setIsCategoryDialogOpen}>
+        <DialogContent className="bg-white sm:max-w-sm rounded-2xl shadow-2xl">
+          <DialogHeader><DialogTitle className="text-xl font-black">{editingItem ? 'Editar' : 'Nueva'} Categoría</DialogTitle></DialogHeader>
+          <div className="py-4"><label className="text-[10px] font-black uppercase text-gray-400 ml-1">Nombre</label><Input value={categoryForm.name} onChange={e => setCategoryForm({ name: e.target.value })} placeholder="Ej: Accesorios" className="rounded-xl h-12" /></div>
+          <DialogFooter><Button onClick={handleSaveCategory} className="w-full bg-indigo-600 text-white font-black py-6 rounded-xl shadow-lg uppercase text-xs">Actualizar Categoría</Button></DialogFooter>
         </DialogContent>
       </Dialog>
     </motion.div>

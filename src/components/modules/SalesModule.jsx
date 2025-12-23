@@ -164,12 +164,21 @@ const SalesModule = () => {
       const { error: itemsError } = await supabase.from('sale_items').insert(saleItems);
       if (itemsError) throw itemsError;
 
-      for (const item of cart) {
-        const { data: currentProd } = await supabase.from('products').select('stock').eq('id', item.id).single();
-        if(currentProd) {
-          await supabase.from('products').update({ stock: currentProd.stock - item.quantity }).eq('id', item.id);
-        }
-      }
+
+
+     // ✅ Descontar stock desde la DB (sin generar logs de products)
+const stockPayload = cart.map(i => ({
+  product_id: i.id,
+  quantity: i.quantity,
+}));
+
+const { error: stockErr } = await supabase.rpc("apply_sale_stock", {
+  p_branch_id: branchId,
+  p_items: stockPayload,
+});
+
+if (stockErr) throw stockErr;
+
 
       toast({ title: "Venta realizada con éxito" });
       setLastSale({ ...sale, sale_items: saleItems, payment_method: selectedPaymentMethod.name });
@@ -177,7 +186,9 @@ const SalesModule = () => {
       setCart([]);
       fetchProducts();
     } catch (error) {
-      toast({ title: "Error al procesar", variant: "destructive" });
+  console.error("Checkout error:", error);
+  toast({ title: "Error al procesar", variant: "destructive" });
+
     } finally {
       setIsProcessing(false);
     }
@@ -200,7 +211,12 @@ const SalesModule = () => {
 
   return (
     <div className="min-h-screen lg:h-[calc(100vh-100px)] flex flex-col pb-20 lg:pb-0">
-      <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full flex flex-col h-full">
+      <Tabs
+  value={activeTab}
+  onValueChange={setActiveTab}
+  className="w-full flex flex-col h-full min-h-0"
+>
+
         <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4 mb-6 shrink-0 px-1">
           <h2 className="text-2xl md:text-3xl font-bold tracking-tight text-gray-900">Punto de Venta</h2>
           <TabsList className="grid w-full md:w-[400px] grid-cols-2 bg-gray-100">
@@ -253,7 +269,7 @@ const SalesModule = () => {
               {/* ✅ NAVEGACIÓN DE PRODUCTOS (OPTIMIZADO) */}
               {!loading && totalPages > 1 && (
                 <div className="p-3 border-t border-gray-100 flex justify-between items-center bg-white shrink-0">
-                  <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest">Total: {totalCount} prods</p>
+                  <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest">Total: {totalCount} Productos</p>
                   <div className="flex items-center gap-2">
                     <Button variant="outline" size="sm" onClick={() => setCurrentPage(prev => Math.max(1, prev - 1))} disabled={currentPage === 1} className="rounded-xl h-8 w-8 p-0"><ChevronLeft className="w-4 h-4" /></Button>
                     <span className="text-[10px] font-black text-indigo-600 bg-indigo-50 px-3 py-1 rounded-xl border border-indigo-100 uppercase">PÁG {currentPage} / {totalPages}</span>
@@ -324,7 +340,7 @@ const SalesModule = () => {
           </div>
         </TabsContent>
         
-        <TabsContent value="history" className="flex-1 overflow-hidden mt-0 px-1">
+        <TabsContent value="history" className="flex-1 min-h-0 overflow-y-auto mt-0 px-1">
           <SalesHistoryPage />
         </TabsContent>
       </Tabs>

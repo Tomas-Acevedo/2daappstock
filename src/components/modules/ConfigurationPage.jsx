@@ -52,7 +52,6 @@ const ConfigurationPage = () => {
     }
   };
 
-  // ✅ Nueva función para cambiar permiso de historial de caja
   const togglePermission = async (field) => {
     const newValue = !branchData[field];
     try {
@@ -79,6 +78,21 @@ const ConfigurationPage = () => {
     } catch (error) { toast({ title: "Error", variant: "destructive" }); }
   };
 
+  // ✅ Nueva función para eliminar métodos de pago
+  const handleDeletePaymentMethod = async (id) => {
+    if (!window.confirm("¿Seguro que deseas eliminar este método de pago? Esta acción no se puede deshacer.")) return;
+    
+    try {
+      const { error } = await supabase.from('payment_methods').delete().eq('id', id);
+      if (error) throw error;
+      
+      setPaymentMethods(paymentMethods.filter(m => m.id !== id));
+      toast({ title: "Método de pago eliminado" });
+    } catch (error) {
+      toast({ title: "Error al eliminar", variant: "destructive" });
+    }
+  };
+
   const openMethodDialog = (method = null) => {
     if (method) {
       setEditingMethod(method);
@@ -96,7 +110,7 @@ const ConfigurationPage = () => {
     <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="space-y-6 max-w-5xl mx-auto pb-10">
       <div>
         <h1 className="text-2xl font-bold text-gray-900">Configuración de Sucursal</h1>
-        <p className="text-gray-500 text-sm">Gestiona los permisos globales del sistema.</p>
+        <p className="text-gray-500 text-sm">Gestiona los permisos globales y métodos de cobro.</p>
       </div>
 
       {/* PANEL DE PERMISOS */}
@@ -106,7 +120,6 @@ const ConfigurationPage = () => {
           <h2 className="font-semibold text-gray-900">Seguridad y Accesos</h2>
         </div>
         <div className="p-6 space-y-6">
-          {/* Permiso Stock */}
           <div className="flex items-center justify-between p-4 bg-gray-50 rounded-lg border border-gray-100">
             <div>
               <p className="font-bold text-gray-900 text-sm md:text-base">Edición de Stock e Inventario</p>
@@ -117,7 +130,6 @@ const ConfigurationPage = () => {
             </button>
           </div>
 
-          {/* Permiso Caja ✅ NUEVO */}
           <div className="flex items-center justify-between p-4 bg-gray-50 rounded-lg border border-gray-100">
             <div>
               <p className="font-bold text-gray-900 text-sm md:text-base">Ver Historial de Cajas Anteriores</p>
@@ -137,23 +149,41 @@ const ConfigurationPage = () => {
             <CreditCard className="w-5 h-5 text-indigo-600" />
             <h2 className="font-semibold text-gray-900">Métodos de Pago</h2>
           </div>
-          <Button onClick={() => openMethodDialog()} size="sm" className="bg-indigo-600">Agregar</Button>
+          <Button onClick={() => openMethodDialog()} size="sm" className="bg-indigo-600">
+            <Plus className="w-4 h-4 mr-2" /> Agregar
+          </Button>
         </div>
         <div className="overflow-x-auto">
           <table className="w-full text-sm text-left">
             <thead className="bg-gray-50 text-gray-500 font-medium">
-              <tr><th className="px-6 py-3">Nombre</th><th className="px-6 py-3">Descuento</th><th className="px-6 py-3 text-right">Acción</th></tr>
+              <tr>
+                <th className="px-6 py-3">Nombre</th>
+                <th className="px-6 py-3">Descuento</th>
+                <th className="px-6 py-3 text-right">Acciones</th>
+              </tr>
             </thead>
             <tbody className="divide-y divide-gray-100">
               {paymentMethods.map((m) => (
-                <tr key={m.id} className="hover:bg-gray-50/50">
-                  <td className="px-6 py-4 font-medium">{m.name}</td>
+                <tr key={m.id} className="hover:bg-gray-50/50 transition-colors">
+                  <td className="px-6 py-4 font-medium text-gray-900">{m.name}</td>
                   <td className="px-6 py-4 text-green-600 font-bold">{m.discount_percentage}%</td>
                   <td className="px-6 py-4 text-right">
-                    <Button variant="ghost" size="icon" onClick={() => openMethodDialog(m)}><Edit className="w-4 h-4 text-gray-400" /></Button>
+                    <div className="flex justify-end gap-2">
+                      <Button variant="ghost" size="icon" onClick={() => openMethodDialog(m)}>
+                        <Edit className="w-4 h-4 text-gray-400 hover:text-indigo-600" />
+                      </Button>
+                      <Button variant="ghost" size="icon" onClick={() => handleDeletePaymentMethod(m.id)}>
+                        <Trash2 className="w-4 h-4 text-red-400 hover:text-red-600" />
+                      </Button>
+                    </div>
                   </td>
                 </tr>
               ))}
+              {paymentMethods.length === 0 && (
+                <tr>
+                  <td colSpan="3" className="px-6 py-10 text-center text-gray-400">No hay métodos de pago configurados.</td>
+                </tr>
+              )}
             </tbody>
           </table>
         </div>
@@ -161,12 +191,32 @@ const ConfigurationPage = () => {
 
       <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
         <DialogContent className="bg-white">
-          <DialogHeader><DialogTitle>{editingMethod ? 'Editar' : 'Nuevo'} Método</DialogTitle></DialogHeader>
+          <DialogHeader><DialogTitle>{editingMethod ? 'Editar' : 'Nuevo'} Método de Pago</DialogTitle></DialogHeader>
           <div className="space-y-4 py-4">
-            <div><label className="text-sm font-medium">Nombre</label><Input value={formData.name} onChange={(e) => setFormData({...formData, name: e.target.value})} /></div>
-            <div><label className="text-sm font-medium">Descuento (%)</label><Input type="number" value={formData.discount_percentage} onChange={(e) => setFormData({...formData, discount_percentage: Number(e.target.value)})} /></div>
+            <div>
+              <label className="text-sm font-medium mb-1.5 block">Nombre</label>
+              <Input 
+                value={formData.name} 
+                onChange={(e) => setFormData({...formData, name: e.target.value})} 
+                placeholder="Ej: Transferencia, Efectivo..."
+              />
+            </div>
+            <div>
+              <label className="text-sm font-medium mb-1.5 block">Descuento (%)</label>
+              <Input 
+                type="number" 
+                value={formData.discount_percentage} 
+                onChange={(e) => setFormData({...formData, discount_percentage: Number(e.target.value)})} 
+                placeholder="0"
+              />
+            </div>
           </div>
-          <DialogFooter><Button onClick={handleSavePaymentMethod} className="bg-indigo-600 text-white">Guardar</Button></DialogFooter>
+          <DialogFooter>
+            <Button variant="ghost" onClick={() => setIsDialogOpen(false)}>Cancelar</Button>
+            <Button onClick={handleSavePaymentMethod} className="bg-indigo-600 text-white">
+              Guardar Cambios
+            </Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
     </motion.div>
