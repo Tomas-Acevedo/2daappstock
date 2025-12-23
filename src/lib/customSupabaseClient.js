@@ -1,13 +1,15 @@
-import { createClient } from '@supabase/supabase-js';
+import { createClient } from "@supabase/supabase-js";
 
-const supabaseUrl = 'https://twpdebifihzlgbmfwfcr.supabase.co';
-const supabaseAnonKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InR3cGRlYmlmaWh6bGdibWZ3ZmNyIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjYyNzI2ODIsImV4cCI6MjA4MTg0ODY4Mn0.sY4iYD6P1zEoy7EZwGfXPZ7HKeDcXjbdXEjuAXC6AB0';
+const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
+const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
 
-const customSupabaseClient = createClient(supabaseUrl, supabaseAnonKey);
+export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
+  auth: {
+    persistSession: true,
+    autoRefreshToken: true,
+    detectSessionInUrl: true,
+    storage: localStorage, // ✅ clave para que no se cierre al cerrar la PWA
+  },
+});
 
-export default customSupabaseClient;
-
-export { 
-    customSupabaseClient,
-    customSupabaseClient as supabase,
-};
+export default supabase;
