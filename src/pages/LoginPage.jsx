@@ -55,7 +55,7 @@ const LoginPage = () => {
           <div className="w-16 h-16 bg-indigo-600 rounded-xl mx-auto flex items-center justify-center mb-6 shadow-lg shadow-indigo-200">
             <LayoutGrid className="w-8 h-8 text-white" />
           </div>
-          <h1 className="text-2xl font-bold text-gray-900 mb-2"> Gestión de Stock</h1>
+          <h1 className="text-2xl font-bold text-gray-900 mb-2"> Gestify</h1>
           <p className="text-gray-500 text-sm">Ingresa a tu cuenta para gestionar tu negocio</p>
         </div>
 
@@ -98,11 +98,7 @@ const LoginPage = () => {
             {loadingUI ? <Loader2 className="w-5 h-5 animate-spin" /> : "Iniciar Sesión"}
           </Button>
 
-          <div className="text-center pt-4">
-            <a href="#" className="text-sm text-indigo-600 hover:text-indigo-800 font-medium">
-              ¿Olvidaste tu contraseña?
-            </a>
-          </div>
+          
         </form>
       </motion.div>
     </div>

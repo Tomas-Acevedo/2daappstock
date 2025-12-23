@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { 
   Search, ShoppingCart, Trash2, Plus, Minus, 
-  Loader2, Tag, Receipt, ChevronLeft, ChevronRight 
+  Loader2, Tag, Receipt, ChevronLeft, ChevronRight, Edit3 
 } from 'lucide-react';
 import { supabase } from '@/lib/customSupabaseClient';
 import { toast } from '@/components/ui/use-toast';
@@ -31,7 +31,11 @@ const SalesModule = () => {
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedCategory, setSelectedCategory] = useState('all');
   
-  // ✅ ESTADOS DE OPTIMIZACIÓN
+  // ✅ ESTADOS PARA PRODUCTO PERSONALIZADO
+  const [customName, setCustomName] = useState('');
+  const [customPrice, setCustomPrice] = useState('');
+
+  // ✅ ESTADOS DE PAGINACIÓN
   const [currentPage, setCurrentPage] = useState(1);
   const [totalCount, setTotalCount] = useState(0);
   const itemsPerPage = 20;
@@ -43,7 +47,6 @@ const SalesModule = () => {
   const [branchDetails, setBranchDetails] = useState(null);
   const [isTicketDialogOpen, setIsTicketDialogOpen] = useState(false);
 
-  // ✅ FETCH OPTIMIZADO POR SERVIDOR
   const fetchProducts = useCallback(async () => {
     if (!branchId) return;
     try {
@@ -87,7 +90,6 @@ const SalesModule = () => {
     }
   }, [branchId, fetchProducts]);
 
-  // Resetear página al filtrar
   useEffect(() => { setCurrentPage(1); }, [searchTerm, selectedCategory]);
 
   const fetchCategories = async () => {
@@ -122,8 +124,28 @@ const SalesModule = () => {
         }
         return prev.map(p => p.id === product.id ? { ...p, quantity: p.quantity + 1 } : p);
       }
-      return [...prev, { ...product, quantity: 1 }];
+      return [...prev, { ...product, quantity: 1, is_custom: false }];
     });
+  };
+
+  // ✅ FUNCIÓN PARA AÑADIR PRODUCTO PERSONALIZADO
+  const addCustomToCart = () => {
+    if (!customName.trim() || !customPrice || Number(customPrice) <= 0) {
+      toast({ title: "Faltan datos", description: "Ingresa nombre y precio válido", variant: "destructive" });
+      return;
+    }
+    const customItem = {
+      id: `custom-${Date.now()}`,
+      name: customName,
+      price: Number(customPrice),
+      quantity: 1,
+      is_custom: true,
+      stock: 999999 
+    };
+    setCart(prev => [...prev, customItem]);
+    setCustomName('');
+    setCustomPrice('');
+    toast({ title: "Producto personalizado añadido" });
   };
 
   const removeFromCart = (productId) => setCart(prev => prev.filter(p => p.id !== productId));
@@ -158,27 +180,31 @@ const SalesModule = () => {
       if (saleError) throw saleError;
 
       const saleItems = cart.map(item => ({
-        sale_id: sale.id, product_id: item.id, product_name: item.name,
-        quantity: item.quantity, unit_price: item.price, is_custom: false
+        sale_id: sale.id, 
+        product_id: item.is_custom ? null : item.id, 
+        product_name: item.name,
+        quantity: item.quantity, 
+        unit_price: item.price, 
+        is_custom: item.is_custom
       }));
+      
       const { error: itemsError } = await supabase.from('sale_items').insert(saleItems);
       if (itemsError) throw itemsError;
 
+      // ✅ Descontar stock SOLO de productos de inventario
+      const stockItemsToUpdate = cart.filter(i => !i.is_custom);
+      if (stockItemsToUpdate.length > 0) {
+        const stockPayload = stockItemsToUpdate.map(i => ({
+          product_id: i.id,
+          quantity: i.quantity,
+        }));
 
-
-     // ✅ Descontar stock desde la DB (sin generar logs de products)
-const stockPayload = cart.map(i => ({
-  product_id: i.id,
-  quantity: i.quantity,
-}));
-
-const { error: stockErr } = await supabase.rpc("apply_sale_stock", {
-  p_branch_id: branchId,
-  p_items: stockPayload,
-});
-
-if (stockErr) throw stockErr;
-
+        const { error: stockErr } = await supabase.rpc("apply_sale_stock", {
+          p_branch_id: branchId,
+          p_items: stockPayload,
+        });
+        if (stockErr) throw stockErr;
+      }
 
       toast({ title: "Venta realizada con éxito" });
       setLastSale({ ...sale, sale_items: saleItems, payment_method: selectedPaymentMethod.name });
@@ -186,37 +212,19 @@ if (stockErr) throw stockErr;
       setCart([]);
       fetchProducts();
     } catch (error) {
-  console.error("Checkout error:", error);
-  toast({ title: "Error al procesar", variant: "destructive" });
-
+      console.error("Checkout error:", error);
+      toast({ title: "Error al procesar", variant: "destructive" });
     } finally {
       setIsProcessing(false);
     }
   };
 
-  const printTicket = (sale) => {
-    const ticketContent = `
-      <html><head><title>Ticket</title><style>body{font-family:'Courier New',monospace;font-size:12px;max-width:300px;margin:0 auto;padding:10px}h3,p{margin:0}.header{text-align:center;margin-bottom:10px}.divider{border-top:1px dashed #000;margin:10px 0}.item,.total{display:flex;justify-content:space-between}.item{margin-bottom:5px}.total{font-weight:700;font-size:14px;margin-top:10px}.footer{text-align:center;margin-top:20px;font-size:10px}</style></head><body>
-      <div class="header"><h3>${branchDetails?.name || 'Sucursal'}</h3><p>${formatDateTime(sale.created_at)}</p></div><div class="divider"></div>
-      ${sale.sale_items.map(item=>`<div class="item"><span>${item.quantity}x ${item.product_name}</span><span>$${(item.unit_price*item.quantity).toLocaleString('es-AR')}</span></div>`).join('')}
-      <div class="divider"></div><div class="total"><span>TOTAL</span><span>${formatCurrency(sale.total)}</span></div>
-      <script>window.onload=function(){window.print();window.close()}</script></body></html>
-    `;
-    const win = window.open('','','height=600,width=400');
-    win.document.write(ticketContent);
-    win.document.close();
-  };
-
+  // ✅ DEFINICIÓN DE totalPages (Esto arregla el error de la imagen)
   const totalPages = Math.ceil(totalCount / itemsPerPage);
 
   return (
     <div className="min-h-screen lg:h-[calc(100vh-100px)] flex flex-col pb-20 lg:pb-0">
-      <Tabs
-  value={activeTab}
-  onValueChange={setActiveTab}
-  className="w-full flex flex-col h-full min-h-0"
->
-
+      <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full flex flex-col h-full min-h-0">
         <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4 mb-6 shrink-0 px-1">
           <h2 className="text-2xl md:text-3xl font-bold tracking-tight text-gray-900">Punto de Venta</h2>
           <TabsList className="grid w-full md:w-[400px] grid-cols-2 bg-gray-100">
@@ -266,7 +274,7 @@ if (stockErr) throw stockErr;
                 )}
               </div>
 
-              {/* ✅ NAVEGACIÓN DE PRODUCTOS (OPTIMIZADO) */}
+              {/* Navegación */}
               {!loading && totalPages > 1 && (
                 <div className="p-3 border-t border-gray-100 flex justify-between items-center bg-white shrink-0">
                   <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest">Total: {totalCount} Productos</p>
@@ -287,6 +295,31 @@ if (stockErr) throw stockErr;
                 {cart.length > 0 && <span className="ml-auto bg-indigo-600 text-white text-[10px] px-2 py-0.5 rounded-full">{cart.length}</span>}
               </div>
 
+              {/* ✅ SECCIÓN PRODUCTO PERSONALIZADO */}
+              <div className="p-3 bg-indigo-50/50 border-b border-indigo-100 space-y-2">
+                <p className="text-[10px] font-bold text-indigo-600 uppercase flex items-center gap-1">
+                  <Edit3 className="w-3 h-3" /> Añadir Personalizado
+                </p>
+                <div className="flex gap-2">
+                  <Input 
+                    placeholder="Nombre..." 
+                    className="h-8 text-xs bg-white" 
+                    value={customName}
+                    onChange={(e) => setCustomName(e.target.value)}
+                  />
+                  <Input 
+                    type="number" 
+                    placeholder="Precio" 
+                    className="h-8 text-xs w-24 bg-white" 
+                    value={customPrice}
+                    onChange={(e) => setCustomPrice(e.target.value)}
+                  />
+                  <Button size="sm" className="h-8 w-8 p-0 bg-indigo-600 shrink-0" onClick={addCustomToCart}>
+                    <Plus className="w-4 h-4 text-white" />
+                  </Button>
+                </div>
+              </div>
+
               <div className="flex-1 overflow-y-auto p-3 space-y-3 max-h-[300px] lg:max-h-none">
                 {cart.length === 0 ? (
                   <div className="h-full flex flex-col items-center justify-center text-gray-400 py-10 space-y-2 opacity-40">
@@ -295,9 +328,12 @@ if (stockErr) throw stockErr;
                   </div>
                 ) : (
                   cart.map(item => (
-                    <div key={item.id} className="flex flex-col bg-gray-50 p-3 rounded-lg border border-gray-100">
+                    <div key={item.id} className={`flex flex-col p-3 rounded-lg border ${item.is_custom ? 'bg-amber-50 border-amber-100' : 'bg-gray-50 border-gray-100'}`}>
                       <div className="flex justify-between mb-2">
-                        <p className="font-medium text-xs md:text-sm text-gray-900 flex-1 pr-2">{item.name}</p>
+                        <div className="flex items-center gap-2 flex-1">
+                          <p className="font-medium text-xs md:text-sm text-gray-900 line-clamp-1">{item.name}</p>
+                          {item.is_custom && <span className="text-[8px] bg-amber-200 text-amber-700 px-1 rounded uppercase font-black">CUST</span>}
+                        </div>
                         <button onClick={() => removeFromCart(item.id)} className="text-gray-400 hover:text-red-500"><Trash2 className="w-4 h-4" /></button>
                       </div>
                       <div className="flex justify-between items-center">

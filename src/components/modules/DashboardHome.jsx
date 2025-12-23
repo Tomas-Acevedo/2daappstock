@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect } from 'react';
 import { useParams } from 'react-router-dom';
 import { motion } from 'framer-motion';
@@ -13,68 +12,84 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from '@/components/ui/button';
 import { toast } from '@/components/ui/use-toast';
 
-const SalesTable = ({ sales, loading, onDelete, onPrint }) => {
+// ✅ TABLA ACTUALIZADA: Lista TODOS los productos sin excepción
+const SalesTable = ({ sales, loading, onDelete, onPrint, paymentMethods }) => {
   if (loading) {
-    return <div className="text-center p-10 text-gray-400">Cargando ventas...</div>;
+    return <div className="text-center p-10 text-lg text-gray-400 font-medium">Cargando ventas...</div>;
   }
 
   if (sales.length === 0) {
     return (
-      <div className="text-center p-10 bg-gray-50 rounded-xl border border-dashed border-gray-300 text-gray-400">
+      <div className="text-center p-12 bg-gray-50 rounded-xl border border-dashed border-gray-300 text-gray-500 text-lg">
         No se encontraron ventas para los filtros seleccionados.
       </div>
     );
   }
 
   return (
-    <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
+    <div className="bg-white rounded-2xl shadow-md border border-gray-200 overflow-hidden">
       <div className="overflow-x-auto">
-        <table className="w-full text-sm text-left">
-          <thead className="bg-gray-50 border-b border-gray-200 text-gray-600 font-medium">
+        <table className="w-full text-left border-collapse">
+          <thead className="bg-gray-100 border-b-2 border-gray-200 text-gray-700">
             <tr>
-              <th className="px-6 py-4">Fecha / Hora</th>
-              <th className="px-6 py-4">Cliente</th>
-              <th className="px-6 py-4">Detalle Compra</th>
-              <th className="px-6 py-4">Método</th>
-              <th className="px-6 py-4 text-right">Total</th>
-              <th className="px-6 py-4 text-center">Acciones</th>
+              <th className="px-6 py-5 text-xs font-black uppercase tracking-widest">Fecha / Hora</th>
+              <th className="px-6 py-5 text-xs font-black uppercase tracking-widest">Cliente</th>
+              <th className="px-6 py-5 text-xs font-black uppercase tracking-widest">Detalle Compra</th>
+              <th className="px-6 py-5 text-xs font-black uppercase tracking-widest">Método</th>
+              <th className="px-6 py-5 text-right text-xs font-black uppercase tracking-widest">Total</th>
+              <th className="px-6 py-5 text-center text-xs font-black uppercase tracking-widest">Acciones</th>
             </tr>
           </thead>
-          <tbody className="divide-y divide-gray-100">
+          <tbody className="divide-y divide-gray-200">
             {sales.map((sale) => (
-              <tr key={sale.id} className="hover:bg-gray-50/50 transition-colors">
-                <td className="px-6 py-4 whitespace-nowrap text-gray-500">
-                  <div className="font-medium text-gray-900">{formatDateTime(sale.created_at).split(',')[0]}</div>
-                  <div className="text-xs">{formatDateTime(sale.created_at).split(',')[1]}</div>
+              <tr key={sale.id} className="hover:bg-indigo-50/40 transition-colors">
+                <td className="px-6 py-6 whitespace-nowrap align-top">
+                  <div className="text-base font-bold text-gray-900">{formatDateTime(sale.created_at).split(',')[0]}</div>
+                  <div className="text-sm text-gray-500 font-medium">{formatDateTime(sale.created_at).split(',')[1]}</div>
                 </td>
-                <td className="px-6 py-4 font-medium text-gray-900">{sale.customer_name || "Cliente General"}</td>
-                <td className="px-6 py-4">
-                  <div className="flex flex-col gap-1">
-                    {sale.sale_items?.slice(0, 2).map((item, idx) => (
-                      <span key={idx} className="text-xs text-gray-600 max-w-[200px] truncate">
-                        {item.quantity}x {item.product_name}
+                <td className="px-6 py-6 text-base font-bold text-gray-900 align-top">
+                  {sale.customer_name || "Cliente General"}
+                </td>
+                <td className="px-6 py-6 align-top">
+                  <div className="flex flex-col gap-2">
+                    {/* ✅ Se eliminó el .slice() para mostrar la lista completa */}
+                    {sale.sale_items?.map((item, idx) => (
+                      <span key={idx} className="text-sm text-gray-800 font-bold max-w-[350px] flex items-start gap-2">
+                        <span className="text-indigo-600 font-black min-w-[25px]">{item.quantity}x</span> 
+                        <span className="flex-1">{item.product_name}</span>
+                        <span className="text-gray-400 font-semibold text-xs whitespace-nowrap">({formatCurrency(item.unit_price)})</span>
                       </span>
                     ))}
-                    {sale.sale_items?.length > 2 && (
-                      <span className="text-xs text-indigo-500 italic">
-                        +{sale.sale_items.length - 2} más...
-                      </span>
-                    )}
                   </div>
                 </td>
-                <td className="px-6 py-4">
-                  <span className="px-2 py-1 rounded text-xs font-bold capitalize bg-gray-100 text-gray-700">
-                    {sale.payment_method}
-                  </span>
+                <td className="px-6 py-6 align-top">
+                  <div className="flex items-center gap-2">
+                    <span className="px-3 py-1.5 rounded-lg text-[11px] font-black uppercase tracking-wider bg-indigo-50 text-indigo-700 border border-indigo-100 shadow-sm">
+                      {sale.payment_method}
+                    </span>
+                    {(() => {
+                      const method = paymentMethods.find(m => m.name === sale.payment_method);
+                      if (method && Number(method.discount_percentage) > 0) {
+                        return (
+                          <span className="text-[10px] bg-green-500 text-white px-2 py-0.5 rounded-full font-black">
+                            -{method.discount_percentage}%
+                          </span>
+                        );
+                      }
+                      return null;
+                    })()}
+                  </div>
                 </td>
-                <td className="px-6 py-4 text-right font-bold text-gray-900">{formatCurrency(sale.total)}</td>
-                <td className="px-6 py-4">
-                  <div className="flex items-center justify-center gap-2">
-                    <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => onPrint(sale)} title="Imprimir Ticket">
-                      <Receipt className="w-4 h-4 text-gray-500" />
+                <td className="px-6 py-6 text-right text-xl font-black text-gray-900 tracking-tighter align-top">
+                  {formatCurrency(sale.total)}
+                </td>
+                <td className="px-6 py-6 align-top">
+                  <div className="flex items-center justify-center gap-3">
+                    <Button variant="outline" size="icon" className="h-10 w-10 rounded-xl border-gray-200 hover:bg-indigo-50 hover:text-indigo-600 transition-all" onClick={() => onPrint(sale)}>
+                      <Receipt className="w-5 h-5" />
                     </Button>
-                    <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => onDelete(sale)} title="Eliminar Venta">
-                      <Trash2 className="w-4 h-4 text-red-500" />
+                    <Button variant="outline" size="icon" className="h-10 w-10 rounded-xl border-gray-200 hover:bg-red-50 hover:text-red-600 transition-all" onClick={() => onDelete(sale)}>
+                      <Trash2 className="w-5 h-5 text-red-500" />
                     </Button>
                   </div>
                 </td>
@@ -90,7 +105,6 @@ const SalesTable = ({ sales, loading, onDelete, onPrint }) => {
 const DashboardHome = () => {
   const { branchId } = useParams();
   
-  // States
   const [metrics, setMetrics] = useState({ periodSales: 0, orderCount: 0, customerCount: 0, averageTicket: 0 });
   const [salesData, setSalesData] = useState([]);
   const [dateRange, setDateRange] = useState({ start: getArgentinaDate(), end: getArgentinaDate() });
@@ -115,7 +129,7 @@ const DashboardHome = () => {
   };
 
   const fetchPaymentMethods = async () => {
-    const { data } = await supabase.from('payment_methods').select('*').eq('branch_id', branchId).eq('is_active', true);
+    const { data } = await supabase.from('payment_methods').select('id, name, discount_percentage').eq('branch_id', branchId).eq('is_active', true);
     if (data) setAvailableMethods(data);
   };
 
@@ -173,7 +187,7 @@ const DashboardHome = () => {
       const { error } = await supabase.from('sales').delete().eq('id', sale.id);
       if (error) throw error;
       toast({ title: "Venta eliminada y stock restaurado" });
-      fetchDashboardData(); // Refresh data
+      fetchDashboardData(); 
     } catch (error) {
       toast({ title: "Error al eliminar venta", variant: "destructive" });
     }
@@ -231,21 +245,27 @@ const DashboardHome = () => {
           { title: "Clientes Únicos", value: metrics.customerCount, desc: "En el periodo seleccionado", icon: Users, color: "text-orange-600" }
         ].map((item, i) => (
           <motion.div key={i} initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.1 * (i+1) }}>
-            <Card>
+            <Card className="shadow-sm">
               <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                <CardTitle className="text-sm font-medium">{item.title}</CardTitle>
-                <item.icon className={`h-4 w-4 ${item.color}`} />
+                <CardTitle className="text-sm font-black uppercase tracking-wider text-gray-500">{item.title}</CardTitle>
+                <item.icon className={`h-5 w-5 ${item.color}`} />
               </CardHeader>
               <CardContent>
-                <div className="text-2xl font-bold">{loading ? "..." : item.value}</div>
-                <p className="text-xs text-muted-foreground">{item.desc}</p>
+                <div className="text-2xl font-black text-gray-900">{loading ? "..." : item.value}</div>
+                <p className="text-xs text-muted-foreground mt-1">{item.desc}</p>
               </CardContent>
             </Card>
           </motion.div>
         ))}
       </div>
 
-      <SalesTable sales={salesData} loading={loading} onDelete={handleDeleteSale} onPrint={printTicket} />
+      <SalesTable 
+        sales={salesData} 
+        loading={loading} 
+        onDelete={handleDeleteSale} 
+        onPrint={printTicket} 
+        paymentMethods={availableMethods}
+      />
     </div>
   );
 };

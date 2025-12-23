@@ -31,7 +31,6 @@ const OrdersPage = () => {
   const [summary, setSummary] = useState({ pendingARS: 0, pendingUSD: 0 });
   const itemsPerPage = 15;
 
-  // Estado para el buscador de productos dentro del modal
   const [productSearch, setProductSearch] = useState('');
 
   const [orderForm, setOrderForm] = useState({
@@ -41,9 +40,8 @@ const OrdersPage = () => {
 
   const [selectedProduct, setSelectedProduct] = useState('');
   const [selectedQty, setSelectedQty] = useState(1);
-  const [customProductForm, setCustomProductForm] = useState({ name: '', price: 0, quantity: 1 });
+  const [customProductForm, setCustomProductForm] = useState({ name: '', price: '', quantity: 1 });
 
-  // Filtrado dinámico de productos para el selector
   const filteredInventoryProducts = useMemo(() => {
     return products.filter(p => 
       p.name.toLowerCase().includes(productSearch.toLowerCase())
@@ -59,8 +57,8 @@ const OrdersPage = () => {
       .from('orders')
       .select('*', { count: 'exact' })
       .eq('branch_id', branchId)
-      .order('created_at', { ascending: false })
       .order('order_date', { ascending: false })
+      .order('created_at', { ascending: false })
       .range(from, to);
 
     if (searchTerm) {
@@ -137,9 +135,9 @@ const OrdersPage = () => {
   };
 
   const handleAddCustomProduct = () => {
-    if (!customProductForm.name || customProductForm.price <= 0) return;
+    if (!customProductForm.name || !customProductForm.price || customProductForm.price <= 0) return;
     setOrderForm(prev => ({ ...prev, custom_products: [...prev.custom_products, { ...customProductForm, type: 'custom' }] }));
-    setCustomProductForm({ name: '', price: 0, quantity: 1 });
+    setCustomProductForm({ name: '', price: '', quantity: 1 });
   };
 
   const removeProductFromForm = (index, type) => {
@@ -147,7 +145,28 @@ const OrdersPage = () => {
     else setOrderForm(prev => ({ ...prev, custom_products: prev.custom_products.filter((_, i) => i !== index) }));
   };
 
+  // ✅ FUNCIÓN DE GUARDADO CON VALIDACIONES ACTUALIZADAS
   const handleSubmitOrder = async () => {
+    // 1. Validar nombre del cliente
+    if (!orderForm.client_name.trim()) {
+      toast({ 
+        title: "Campo obligatorio", 
+        description: "Por favor, ingresa el nombre del cliente", 
+        variant: "destructive" 
+      });
+      return;
+    }
+
+    // 2. Validar que existan productos
+    if (orderForm.products.length === 0 && orderForm.custom_products.length === 0) {
+      toast({ 
+        title: "Pedido vacío", 
+        description: "Debes agregar al menos un producto (inventario o personalizado)", 
+        variant: "destructive" 
+      });
+      return;
+    }
+
     const total = calculateTotal();
     const pending = total - Number(orderForm.paid_amount);
     let status = pending <= 0 ? 'Pagado' : Number(orderForm.paid_amount) > 0 ? 'Parcial' : 'Pendiente';
@@ -230,7 +249,16 @@ const OrdersPage = () => {
             <DialogHeader><DialogTitle className="text-2xl font-black">{editingOrder ? 'Editar Pedido' : 'Crear Nuevo Pedido'}</DialogTitle></DialogHeader>
             <div className="grid gap-6 py-4">
               <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-2"><label className="text-xs font-black uppercase text-gray-400 ml-1">Cliente</label><Input value={orderForm.client_name} onChange={e => setOrderForm({...orderForm, client_name: e.target.value})} placeholder="Nombre completo" className="rounded-xl h-12" /></div>
+                <div className="space-y-2">
+                  <label className="text-xs font-black uppercase text-gray-400 ml-1">Cliente *</label>
+                  <Input 
+                    value={orderForm.client_name} 
+                    onChange={e => setOrderForm({...orderForm, client_name: e.target.value})} 
+                    placeholder="Nombre completo" 
+                    className="rounded-xl h-12" 
+                    required
+                  />
+                </div>
                 <div className="space-y-2"><label className="text-xs font-black uppercase text-gray-400 ml-1">Fecha</label><Input type="date" value={orderForm.order_date} onChange={e => setOrderForm({...orderForm, order_date: e.target.value})} className="rounded-xl h-12" /></div>
               </div>
               <div className="space-y-2"><label className="text-xs font-black uppercase text-gray-400 ml-1">Notas</label><textarea value={orderForm.notes} onChange={e => setOrderForm({...orderForm, notes: e.target.value})} placeholder="Detalles extra..." className="w-full min-h-[80px] rounded-xl border border-input p-3 text-sm focus:ring-2 focus:ring-indigo-500 outline-none" /></div>
@@ -239,7 +267,6 @@ const OrdersPage = () => {
               <div className="space-y-4 border rounded-2xl p-5 bg-gray-50/50 border-gray-100">
                 <h3 className="font-bold text-xs flex items-center gap-2 text-indigo-600 uppercase tracking-widest"><Package className="w-4 h-4" /> Desde Inventario</h3>
                 <div className="space-y-3">
-                  {/* Buscador de productos */}
                   <div className="relative">
                     <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
                     <Input 
@@ -264,9 +291,6 @@ const OrdersPage = () => {
                     <Input type="number" className="w-24 h-12 rounded-xl font-bold" min="1" value={selectedQty} onFocus={e => e.target.select()} onChange={e => setSelectedQty(e.target.value)} />
                     <Button onClick={handleAddStockProduct} type="button" variant="secondary" className="h-12 rounded-xl px-6 font-bold">Sumar</Button>
                   </div>
-                  {productSearch && (
-                    <p className="text-[10px] text-gray-400 italic ml-1">Mostrando {filteredInventoryProducts.length} de {products.length} productos.</p>
-                  )}
                 </div>
               </div>
 
@@ -274,14 +298,41 @@ const OrdersPage = () => {
               <div className="space-y-4 border rounded-2xl p-5 bg-gray-50/50 border-gray-100">
                 <h3 className="font-bold text-xs flex items-center gap-2 text-blue-600 uppercase tracking-widest"><Edit className="w-4 h-4" /> Personalizado</h3>
                 <div className="grid grid-cols-12 gap-2">
-                  <div className="col-span-5"><Input placeholder="Descripción" value={customProductForm.name} onChange={e => setCustomProductForm({...customProductForm, name: e.target.value})} className="rounded-xl h-12" /></div>
-                  <div className="col-span-3"><Input type="number" placeholder="Precio" value={customProductForm.price} onFocus={e => e.target.select()} onChange={e => setCustomProductForm({...customProductForm, price: e.target.value})} className="rounded-xl h-12" /></div>
-                  <div className="col-span-2"><Input type="number" placeholder="Cant." value={customProductForm.quantity} onFocus={e => e.target.select()} onChange={e => setCustomProductForm({...customProductForm, quantity: e.target.value})} className="rounded-xl h-12" /></div>
-                  <div className="col-span-2"><Button onClick={handleAddCustomProduct} type="button" variant="secondary" className="w-full h-12 rounded-xl font-bold">Sumar</Button></div>
+                  <div className="col-span-5">
+                    <Input 
+                      placeholder="Nombre producto" 
+                      value={customProductForm.name} 
+                      onChange={e => setCustomProductForm({...customProductForm, name: e.target.value})} 
+                      className="rounded-xl h-12" 
+                    />
+                  </div>
+                  <div className="col-span-3">
+                    <Input 
+                      type="number" 
+                      placeholder="Precio" 
+                      value={customProductForm.price} 
+                      onFocus={e => e.target.select()} 
+                      onChange={e => setCustomProductForm({...customProductForm, price: e.target.value})} 
+                      className="rounded-xl h-12" 
+                    />
+                  </div>
+                  <div className="col-span-2">
+                    <Input 
+                      type="number" 
+                      placeholder="Cant." 
+                      value={customProductForm.quantity} 
+                      onFocus={e => e.target.select()} 
+                      onChange={e => setCustomProductForm({...customProductForm, quantity: e.target.value})} 
+                      className="rounded-xl h-12" 
+                    />
+                  </div>
+                  <div className="col-span-2">
+                    <Button onClick={handleAddCustomProduct} type="button" variant="secondary" className="w-full h-12 rounded-xl font-bold">Sumar</Button>
+                  </div>
                 </div>
               </div>
 
-              {/* ✅ TABLA DE PRODUCTOS AGREGADOS (VISTA EN MODAL) - AHORA ARRIBA DEL TOTAL */}
+              {/* ✅ TABLA DE PRODUCTOS AGREGADOS */}
               {(orderForm.products.length > 0 || orderForm.custom_products.length > 0) && (
                 <div className="border border-gray-100 rounded-2xl overflow-hidden shadow-sm mt-2">
                   <table className="w-full text-sm">
@@ -296,7 +347,7 @@ const OrdersPage = () => {
 
               <div className="grid grid-cols-2 gap-4 items-end bg-indigo-50/30 p-5 rounded-2xl">
                 <div className="space-y-2"><label className="text-xs font-black uppercase text-gray-400 ml-1">Moneda</label><select className="flex h-12 w-full rounded-xl border border-input bg-white px-3 py-2 text-sm font-bold focus:ring-2 focus:ring-indigo-500" value={orderForm.currency} onChange={e => setOrderForm({...orderForm, currency: e.target.value})}><option value="ARS">Peso Argentino ($)</option><option value="USD">Dólar (US$)</option></select></div>
-                <div className="space-y-2"><label className="text-xs font-black uppercase text-gray-400 ml-1">Abonado (Seña)</label><Input type="number" value={orderForm.paid_amount} onFocus={e => e.target.select()} onChange={e => setOrderForm({...orderForm, paid_amount: e.target.value})} className="rounded-xl h-12 bg-white font-bold text-green-600 focus:ring-2 focus:ring-green-500" /></div>
+                <div className="space-y-2"><label className="text-xs font-black uppercase text-gray-400 ml-1">Abonado</label><Input type="number" value={orderForm.paid_amount} onFocus={e => e.target.select()} onChange={e => setOrderForm({...orderForm, paid_amount: e.target.value})} className="rounded-xl h-12 bg-white font-bold text-green-600 focus:ring-2 focus:ring-green-500" /></div>
               </div>
               <div className="flex justify-between items-center bg-indigo-600 p-6 rounded-2xl text-white shadow-xl shadow-indigo-100"><span className="font-bold opacity-80 uppercase text-xs tracking-widest">Total Estimado</span><span className="text-3xl font-black tracking-tighter">{orderForm.currency === 'USD' ? 'US$' : '$'}{calculateTotal().toLocaleString('es-AR')}</span></div>
             </div>
@@ -340,7 +391,6 @@ const OrdersPage = () => {
                       <div className="flex items-center gap-3"><h3 className="text-xl font-black text-gray-900 group-hover:text-indigo-600 transition-colors">{order.client_name}</h3><span className={`px-3 py-1 rounded-full text-[10px] font-black uppercase ${getStatusColor(order.status)}`}>{order.status}</span></div>
                       {order.notes && (<div className="flex items-start gap-2 bg-gray-50 p-2 rounded-lg border border-gray-100 max-w-md"><StickyNote className="w-3.5 h-3.5 text-amber-500 mt-1 shrink-0" /><p className="text-xs text-gray-600 line-clamp-2 italic">{order.notes}</p></div>)}
                       
-                      {/* ✅ MUESTRA DETALLE DE PRODUCTOS EN LA CARD */}
                       <div className="flex flex-col gap-1.5 mt-1 border-l-2 border-indigo-50 pl-3">
                         {([...(order.products || []), ...(order.custom_products || [])]).map((p, idx) => (
                           <div key={idx} className="flex items-center gap-2 text-gray-700 text-[13px] font-medium leading-tight">
@@ -383,7 +433,7 @@ const OrdersPage = () => {
         )}
       </div>
 
-      {/* ✅ MODAL DE DETALLE RESPONSIVE CORREGIDO */}
+      {/* ✅ MODAL DE DETALLE */}
       <Dialog open={isDetailsOpen} onOpenChange={setIsDetailsOpen}>
         <DialogContent className="max-w-2xl w-[95vw] max-h-[90vh] overflow-y-auto bg-white rounded-3xl shadow-2xl border-none p-4 md:p-6">
           <DialogHeader><DialogTitle className="flex items-center gap-2 text-2xl font-black"><Info className="w-6 h-6 text-indigo-600" /> Detalle - {selectedOrder?.client_name}</DialogTitle></DialogHeader>
@@ -407,7 +457,7 @@ const OrdersPage = () => {
                 <div className="text-4xl font-black text-indigo-900 tracking-tighter">{selectedOrder.currency === 'USD' ? 'US$' : '$'}{Number(selectedOrder.total_amount).toLocaleString('es-AR')}</div>
                 <div className="flex gap-4 pt-2 border-t border-indigo-100 w-full justify-end uppercase text-[9px] font-black tracking-widest">
                    <div className="text-right text-green-600"><p className="opacity-60">Pagado</p><p className="text-base font-black">{selectedOrder.currency === 'USD' ? 'US$' : '$'}{Number(selectedOrder.paid_amount).toLocaleString('es-AR')}</p></div>
-                   <div className="text-right text-red-600"><p className="opacity-60">Restamte</p><p className="text-base font-black">{selectedOrder.currency === 'USD' ? 'US$' : '$'}{Number(selectedOrder.pending_amount).toLocaleString('es-AR')}</p></div>
+                   <div className="text-right text-red-600"><p className="opacity-60">Restante</p><p className="text-base font-black">{selectedOrder.currency === 'USD' ? 'US$' : '$'}{Number(selectedOrder.pending_amount).toLocaleString('es-AR')}</p></div>
                 </div>
               </div>
             </div>
