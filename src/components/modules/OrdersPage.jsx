@@ -154,6 +154,12 @@ const OrdersPage = () => {
     setOrderForm({ client_name: '', products: [], custom_products: [], currency: 'ARS', paid_amount: 0, order_date: getArgentinaDate(), notes: '' });
   };
 
+  const handleShowDetails = (order) => {
+    setSelectedOrder(order);
+    setIsDetailsOpen(true);
+  };
+
+  // ✅ GENERACIÓN DE PDF: Diseño Corregido + Descarga + Apertura Directa
   const generatePDF = (order) => {
     const currencySymbol = order.currency === 'USD' ? 'US$' : '$';
     const allProducts = [...(order.products || []), ...(order.custom_products || [])];
@@ -161,8 +167,9 @@ const OrdersPage = () => {
     
     element.innerHTML = `
       <div style="font-family: Arial, sans-serif; padding: 40px; color: #333; background: white; width: 750px; margin: 0 auto;">
+        
         <div style="text-align: center; margin-bottom: 40px;">
-          ${branchDetails.logo_url ? `<img src="${branchDetails.logo_url}" style="max-height: 110px; display: block; margin: 0 auto 15px auto;" />` : ''}
+          ${branchDetails.logo_url ? `<img src="${branchDetails.logo_url}" style="max-height: 100px; display: block; margin: 0 auto 15px auto;" />` : ''}
           <h1 style="font-size: 28px; font-weight: 900; margin: 0; text-transform: uppercase;">${branchDetails.name || 'Sucursal'}</h1>
           <p style="font-size: 14px; color: #666; letter-spacing: 2px; margin-top: 10px; font-weight: bold;">ORDEN DE PEDIDO</p>
         </div>
@@ -183,10 +190,10 @@ const OrdersPage = () => {
         <table style="width: 100%; border-collapse: collapse; margin-bottom: 30px;">
           <thead>
             <tr>
-              <th style="text-align: left; padding: 12px 0; border-bottom: 2px solid #e2e8f0; font-size: 12px; color: #888;">DESCRIPCIÓN</th>
-              <th style="text-align: center; padding: 12px 0; border-bottom: 2px solid #e2e8f0; font-size: 12px; color: #888;">CANT.</th>
-              <th style="text-align: right; padding: 12px 0; border-bottom: 2px solid #e2e8f0; font-size: 12px; color: #888;">P. UNITARIO</th>
-              <th style="text-align: right; padding: 12px 0; border-bottom: 2px solid #e2e8f0; font-size: 12px; color: #888;">SUBTOTAL</th>
+              <th style="text-align: left; padding: 12px 0; border-bottom: 2px solid #e2e8f0; font-size: 12px; color: #888; text-transform: uppercase;">DESCRIPCIÓN</th>
+              <th style="text-align: center; padding: 12px 0; border-bottom: 2px solid #e2e8f0; font-size: 12px; color: #888; text-transform: uppercase;">CANT.</th>
+              <th style="text-align: right; padding: 12px 0; border-bottom: 2px solid #e2e8f0; font-size: 12px; color: #888; text-transform: uppercase;">P. UNITARIO</th>
+              <th style="text-align: right; padding: 12px 0; border-bottom: 2px solid #e2e8f0; font-size: 12px; color: #888; text-transform: uppercase;">SUBTOTAL</th>
             </tr>
           </thead>
           <tbody>
@@ -224,10 +231,29 @@ const OrdersPage = () => {
       filename: `Pedido_${order.client_name.replace(/\s+/g, '_')}.pdf`,
       image: { type: 'jpeg', quality: 0.98 },
       html2canvas: { scale: 2, useCORS: true },
-      jsPDF: { unit: 'in', format: 'letter', orientation: 'portrait' }
+      jsPDF: { unit: 'in', format: 'A4', orientation: 'portrait' }
     };
 
-    window.html2pdf().from(element).set(opt).save();
+    // ✅ Lógica mejorada para Descargar y Abrir
+    window.html2pdf().from(element).set(opt).toPdf().get('pdf').then(function (pdf) {
+      const blob = pdf.output('blob');
+      const url = URL.createObjectURL(blob);
+      
+      // 1. Abrir en pestaña nueva (Debe ejecutarse como respuesta directa al click)
+      const newWindow = window.open(url, '_blank');
+      if (!newWindow || newWindow.closed || typeof newWindow.closed == 'undefined') {
+        toast({ title: "Bloqueador activado", description: "Permite ventanas emergentes para ver el PDF.", variant: "destructive" });
+      }
+
+      // 2. Forzar descarga programática
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = opt.filename;
+      link.click();
+      
+      // Limpiar memoria
+      setTimeout(() => URL.revokeObjectURL(url), 100);
+    });
   };
 
   const totalPages = Math.ceil(totalCount / itemsPerPage);
@@ -290,9 +316,8 @@ const OrdersPage = () => {
               )}
 
               <div className="grid grid-cols-2 gap-4 bg-indigo-50/30 p-5 rounded-2xl">
-                <div className="space-y-1"><label className="text-[10px] font-black uppercase text-gray-400">Moneda</label><select className="h-12 w-full rounded-xl border bg-white px-3 font-bold" value={orderForm.currency} onChange={e => setOrderForm({...orderForm, currency: e.target.value})}><option value="ARS">Peso ($)</option><option value="USD">Dólar (US$)</option></select></div>
-                {/* CAMPO DE ABONADO / SEÑA */}
-                <div className="space-y-1"><label className="text-[10px] font-black uppercase text-gray-400">Abonado (Seña)</label><Input type="number" value={orderForm.paid_amount} onFocus={e => e.target.select()} onChange={e => setOrderForm({...orderForm, paid_amount: e.target.value})} className="rounded-xl h-12 bg-white font-bold text-green-600" /></div>
+                <div className="space-y-1"><label className="text-[10px] font-black uppercase text-gray-400 ml-1">Moneda</label><select className="flex h-12 w-full rounded-xl border border-input bg-white px-3 font-bold" value={orderForm.currency} onChange={e => setOrderForm({...orderForm, currency: e.target.value})}><option value="ARS">Peso ($)</option><option value="USD">Dólar (US$)</option></select></div>
+                <div className="space-y-1"><label className="text-[10px] font-black uppercase text-gray-400 ml-1">Abonado (Seña)</label><Input type="number" value={orderForm.paid_amount} onFocus={e => e.target.select()} onChange={e => setOrderForm({...orderForm, paid_amount: e.target.value})} className="rounded-xl h-12 bg-white font-bold text-green-600" /></div>
               </div>
               <div className="flex justify-between items-center bg-indigo-600 p-6 rounded-2xl text-white shadow-xl"><span className="font-bold opacity-80 uppercase text-xs">Total del Pedido</span><span className="text-3xl font-black">{orderForm.currency === 'USD' ? 'US$' : '$'}{calculateTotal().toLocaleString('es-AR')}</span></div>
             </div>
@@ -303,14 +328,14 @@ const OrdersPage = () => {
 
       <Card className="bg-white border-gray-100 rounded-3xl overflow-hidden shadow-sm">
         <CardContent className="p-6 flex flex-col md:flex-row gap-6 justify-between items-end">
-          <div className="flex flex-wrap gap-4">
+          <div className="flex flex-wrap gap-4 w-full md:w-auto">
              <div className="space-y-1"><label className="text-[10px] font-black uppercase text-gray-400 ml-1">Buscar</label><Input placeholder="Cliente..." className="w-64 rounded-xl border-gray-200" value={searchTerm} onChange={e => setSearchTerm(e.target.value)} /></div>
              <div className="space-y-1"><label className="text-[10px] font-black uppercase text-gray-400 ml-1">Desde</label><Input type="date" className="w-44 rounded-xl border-gray-200" value={dateFilter.start} onChange={e => setDateFilter({...dateFilter, start: e.target.value})} /></div>
              <div className="space-y-1"><label className="text-[10px] font-black uppercase text-gray-400 ml-1">Hasta</label><Input type="date" className="w-44 rounded-xl border-gray-200" value={dateFilter.end} onChange={e => setDateFilter({...dateFilter, end: e.target.value})} /></div>
           </div>
-          <div className="flex gap-3">
-             <div className="px-4 py-3 bg-red-50/50 rounded-2xl text-center border border-red-100"><p className="text-[9px] font-black uppercase text-red-400">Total Pendiente ARS</p><p className="text-lg font-black text-red-600">${summary.pendingARS.toLocaleString('es-AR')}</p></div>
-             <div className="px-4 py-3 bg-indigo-50/50 rounded-2xl text-center border border-indigo-100"><p className="text-[9px] font-black uppercase text-indigo-400">Total Pendiente USD</p><p className="text-lg font-black text-indigo-600">US${summary.pendingUSD.toLocaleString('es-AR')}</p></div>
+          <div className="flex gap-3 w-full md:w-auto">
+             <div className="px-4 py-3 bg-red-50/50 rounded-2xl text-center border border-red-100"><p className="text-[9px] font-black uppercase text-red-400">Pendiente ARS</p><p className="text-lg font-black text-red-600">${summary.pendingARS.toLocaleString('es-AR')}</p></div>
+             <div className="px-4 py-3 bg-indigo-50/50 rounded-2xl text-center border border-indigo-100"><p className="text-[9px] font-black uppercase text-indigo-400">Pendiente USD</p><p className="text-lg font-black text-indigo-600">US${summary.pendingUSD.toLocaleString('es-AR')}</p></div>
           </div>
         </CardContent>
       </Card>
@@ -328,7 +353,7 @@ const OrdersPage = () => {
                   {order.notes && (<div className="flex gap-2 bg-gray-50 p-2 rounded-lg border italic text-xs text-gray-600"><StickyNote className="w-3.5 h-3.5 text-amber-500" />{order.notes}</div>)}
                   <div className="flex flex-col gap-1 border-l-2 border-indigo-50 pl-3">
                     {([...(order.products || []), ...(order.custom_products || [])]).map((p, idx) => (
-                      <div key={idx} className="text-[13px] font-medium"><span className="font-black text-indigo-400">{p.quantity}x</span> {p.name} <span className="text-gray-400 text-[10px]">({formatCurrency(p.price)})</span></div>
+                      <div key={idx} className="text-[13px] font-medium"><span className="font-black text-indigo-400">{p.quantity}x</span> {p.name}</div>
                     ))}
                   </div>
                 </div>
@@ -344,7 +369,7 @@ const OrdersPage = () => {
                     <Button size="sm" variant="ghost" className="rounded-xl hover:bg-green-50 font-bold" onClick={() => generatePDF(order)}><FileText className="w-4 h-4 mr-2" /> PDF</Button>
                     <Button size="sm" variant="ghost" className="rounded-xl hover:bg-indigo-50 font-bold" onClick={() => handleShowDetails(order)}><Eye className="w-4 h-4 mr-2" /> Detalle</Button>
                     <Button size="sm" variant="ghost" className="rounded-xl hover:bg-yellow-50 font-bold" onClick={() => handleEditOrder(order)}><Edit className="w-4 h-4 mr-2" /> Editar</Button>
-                    <Button size="sm" variant="ghost" className="rounded-xl hover:bg-red-50 text-red-600 font-bold" onClick={() => { if(confirm("¿Eliminar este pedido?")) supabase.from('orders').delete().eq('id', order.id).then(() => fetchOrders()); }}><Trash2 className="w-4 h-4" /></Button>
+                    <Button size="sm" variant="ghost" className="rounded-xl hover:bg-red-50 text-red-600 font-bold" onClick={() => { if(confirm("¿Eliminar?")) supabase.from('orders').delete().eq('id', order.id).then(() => fetchOrders()); }}><Trash2 className="w-4 h-4" /></Button>
                   </div>
                 </div>
               </div>
@@ -355,7 +380,7 @@ const OrdersPage = () => {
 
       <Dialog open={isDetailsOpen} onOpenChange={setIsDetailsOpen}>
         <DialogContent className="max-w-2xl bg-white rounded-3xl p-6">
-          <DialogHeader><DialogTitle className="text-2xl font-black">Resumen del Pedido</DialogTitle></DialogHeader>
+          <DialogHeader><DialogTitle className="text-2xl font-black">Detalle Pedido</DialogTitle></DialogHeader>
           {selectedOrder && (
             <div className="space-y-6">
               <div className="bg-gray-50 p-4 rounded-2xl flex justify-between border border-gray-100">
@@ -370,12 +395,12 @@ const OrdersPage = () => {
                 </table>
               </div>
               <div className="bg-indigo-600 p-6 rounded-2xl text-white flex justify-between items-center shadow-lg">
-                <span className="font-bold opacity-80 uppercase text-xs">Saldo a cobrar:</span>
+                <span className="font-bold opacity-80 uppercase text-xs">A cobrar:</span>
                 <span className="text-3xl font-black">{selectedOrder.currency === 'USD' ? 'US$' : '$'}{Number(selectedOrder.pending_amount).toLocaleString('es-AR')}</span>
               </div>
             </div>
           )}
-          <DialogFooter><Button className="w-full bg-green-700 hover:bg-green-800 text-white rounded-xl h-12 font-bold shadow-md" onClick={() => generatePDF(selectedOrder)}><FileText className="w-4 h-4 mr-2" /> Descargar PDF</Button></DialogFooter>
+          <DialogFooter><Button className="w-full bg-green-700 hover:bg-green-800 text-white rounded-xl h-12 font-bold shadow-md" onClick={() => generatePDF(selectedOrder)}><FileText className="w-4 h-4 mr-2" /> Descargar y Abrir PDF</Button></DialogFooter>
         </DialogContent>
       </Dialog>
     </div>
