@@ -159,7 +159,7 @@ const OrdersPage = () => {
     setIsDetailsOpen(true);
   };
 
-  // ✅ GENERACIÓN DE PDF: Diseño Corregido + Descarga + Apertura Directa
+  // ✅ GENERACIÓN DE PDF: Solo abrir en pestaña nueva (Sin descarga automática)
   const generatePDF = (order) => {
     const currencySymbol = order.currency === 'USD' ? 'US$' : '$';
     const allProducts = [...(order.products || []), ...(order.custom_products || [])];
@@ -169,31 +169,35 @@ const OrdersPage = () => {
       <div style="font-family: Arial, sans-serif; padding: 40px; color: #333; background: white; width: 750px; margin: 0 auto;">
         
         <div style="text-align: center; margin-bottom: 40px;">
-          ${branchDetails.logo_url ? `<img src="${branchDetails.logo_url}" style="max-height: 100px; display: block; margin: 0 auto 15px auto;" />` : ''}
-          <h1 style="font-size: 28px; font-weight: 900; margin: 0; text-transform: uppercase;">${branchDetails.name || 'Sucursal'}</h1>
-          <p style="font-size: 14px; color: #666; letter-spacing: 2px; margin-top: 10px; font-weight: bold;">ORDEN DE PEDIDO</p>
+          ${branchDetails.logo_url ? `<img src="${branchDetails.logo_url}" style="max-height: 120px; display: block; margin: 0 auto 15px auto;" />` : ''}
+          <h1 style="font-size: 32px; font-weight: 900; margin: 0; text-transform: uppercase; letter-spacing: 1px;">${branchDetails.name || 'SUCURSAL'}</h1>
+          <p style="font-size: 14px; color: #666; letter-spacing: 2px; margin-top: 10px; font-weight: bold; text-transform: uppercase;">ORDEN DE PEDIDO</p>
         </div>
 
-        <div style="display: flex; justify-content: space-between; margin-bottom: 30px; font-size: 14px; border-bottom: 2px solid #f0f0f0; padding-bottom: 20px;">
+        <div style="display: flex; justify-content: space-between; margin-bottom: 30px; font-size: 14px; border-bottom: 2px solid #f0f0f0; padding-bottom: 25px;">
           <div>
-            <p style="margin: 5px 0;"><strong>CLIENTE:</strong> ${order.client_name}</p>
-            <p style="margin: 5px 0;"><strong>FECHA:</strong> ${formatDateTime(order.order_date).split(',')[0]}</p>
+            <p style="margin: 5px 0;"><strong style="text-transform: uppercase; color: #555;">CLIENTE:</strong> ${order.client_name}</p>
+            <p style="margin: 5px 0;"><strong style="text-transform: uppercase; color: #555;">FECHA:</strong> ${formatDateTime(order.order_date).split(',')[0]}</p>
           </div>
           <div style="text-align: right;">
-            <p style="margin: 5px 0;"><strong>ESTADO:</strong> ${order.status.toUpperCase()}</p>
-            <p style="margin: 5px 0;"><strong>ID:</strong> #${order.id.slice(0,8).toUpperCase()}</p>
+            <p style="margin: 5px 0;"><strong style="text-transform: uppercase; color: #555;">ESTADO:</strong> ${order.status.toUpperCase()}</p>
+            <p style="margin: 5px 0;"><strong style="text-transform: uppercase; color: #555;">ID:</strong> #${order.id.slice(0,8).toUpperCase()}</p>
           </div>
         </div>
 
-        ${order.notes ? `<div style="margin-bottom: 30px; padding: 15px; border: 1px solid #eee; border-radius: 6px; font-size: 13px;"><strong>NOTAS:</strong> <i>${order.notes}</i></div>` : ''}
+        ${order.notes ? `
+          <div style="margin-bottom: 30px; padding: 15px; border: 1px solid #eee; border-radius: 6px; font-size: 13px;">
+            <strong style="color: #555;">NOTAS:</strong> <span style="font-style: italic; color: #555;">${order.notes}</span>
+          </div>
+        ` : ''}
 
-        <table style="width: 100%; border-collapse: collapse; margin-bottom: 30px;">
+        <table style="width: 100%; border-collapse: collapse; margin-bottom: 40px;">
           <thead>
             <tr>
-              <th style="text-align: left; padding: 12px 0; border-bottom: 2px solid #e2e8f0; font-size: 12px; color: #888; text-transform: uppercase;">DESCRIPCIÓN</th>
-              <th style="text-align: center; padding: 12px 0; border-bottom: 2px solid #e2e8f0; font-size: 12px; color: #888; text-transform: uppercase;">CANT.</th>
-              <th style="text-align: right; padding: 12px 0; border-bottom: 2px solid #e2e8f0; font-size: 12px; color: #888; text-transform: uppercase;">P. UNITARIO</th>
-              <th style="text-align: right; padding: 12px 0; border-bottom: 2px solid #e2e8f0; font-size: 12px; color: #888; text-transform: uppercase;">SUBTOTAL</th>
+              <th style="text-align: left; padding: 10px 0; border-bottom: 2px solid #e2e8f0; font-size: 12px; color: #888; text-transform: uppercase; font-weight: bold;">DESCRIPCIÓN</th>
+              <th style="text-align: center; padding: 10px 0; border-bottom: 2px solid #e2e8f0; font-size: 12px; color: #888; text-transform: uppercase; font-weight: bold;">CANT.</th>
+              <th style="text-align: right; padding: 10px 0; border-bottom: 2px solid #e2e8f0; font-size: 12px; color: #888; text-transform: uppercase; font-weight: bold;">P. UNITARIO</th>
+              <th style="text-align: right; padding: 10px 0; border-bottom: 2px solid #e2e8f0; font-size: 12px; color: #888; text-transform: uppercase; font-weight: bold;">SUBTOTAL</th>
             </tr>
           </thead>
           <tbody>
@@ -208,19 +212,19 @@ const OrdersPage = () => {
           </tbody>
         </table>
 
-        <div style="display: flex; flex-direction: column; align-items: flex-end; gap: 10px;">
-          <div style="width: 250px; font-size: 14px; color: #666; display: flex; justify-content: space-between;">
-            <span>ABONADO:</span> <span>${currencySymbol}${Number(order.paid_amount).toLocaleString('es-AR')}</span>
+        <div style="display: flex; flex-direction: column; align-items: flex-end; gap: 10px; margin-top: 20px;">
+          <div style="width: 250px; font-size: 14px; color: #555; display: flex; justify-content: space-between;">
+            <span style="text-transform: uppercase;">ABONADO:</span> <span>${currencySymbol}${Number(order.paid_amount).toLocaleString('es-AR')}</span>
           </div>
-          <div style="width: 250px; font-size: 14px; color: #666; display: flex; justify-content: space-between;">
-            <span>PENDIENTE:</span> <span>${currencySymbol}${Number(order.pending_amount).toLocaleString('es-AR')}</span>
+          <div style="width: 250px; font-size: 14px; color: #555; display: flex; justify-content: space-between;">
+            <span style="text-transform: uppercase;">PENDIENTE:</span> <span>${currencySymbol}${Number(order.pending_amount).toLocaleString('es-AR')}</span>
           </div>
-          <div style="width: 250px; border-top: 3px solid #000; margin-top: 10px; padding-top: 15px; display: flex; justify-content: space-between; font-size: 28px; font-weight: 900;">
-            <span>TOTAL:</span> <span>${currencySymbol}${Number(order.total_amount).toLocaleString('es-AR')}</span>
+          <div style="width: 280px; border-top: 4px solid #000; margin-top: 15px; padding-top: 15px; display: flex; justify-content: space-between; font-size: 32px; font-weight: 900; color: #000;">
+            <span style="text-transform: uppercase;">TOTAL:</span> <span>${currencySymbol}${Number(order.total_amount).toLocaleString('es-AR')}</span>
           </div>
         </div>
 
-        <div style="margin-top: 80px; text-align: center; font-size: 10px; color: #aaa; border-top: 1px solid #eee; padding-top: 20px;">
+        <div style="margin-top: 80px; text-align: center; font-size: 10px; color: #aaa; border-top: 1px solid #f0f0f0; padding-top: 20px;">
           Generado digitalmente por sistema de gestión - ${new Date().toLocaleDateString('es-AR')}
         </div>
       </div>
@@ -234,25 +238,9 @@ const OrdersPage = () => {
       jsPDF: { unit: 'in', format: 'A4', orientation: 'portrait' }
     };
 
-    // ✅ Lógica mejorada para Descargar y Abrir
-    window.html2pdf().from(element).set(opt).toPdf().get('pdf').then(function (pdf) {
-      const blob = pdf.output('blob');
-      const url = URL.createObjectURL(blob);
-      
-      // 1. Abrir en pestaña nueva (Debe ejecutarse como respuesta directa al click)
-      const newWindow = window.open(url, '_blank');
-      if (!newWindow || newWindow.closed || typeof newWindow.closed == 'undefined') {
-        toast({ title: "Bloqueador activado", description: "Permite ventanas emergentes para ver el PDF.", variant: "destructive" });
-      }
-
-      // 2. Forzar descarga programática
-      const link = document.createElement('a');
-      link.href = url;
-      link.download = opt.filename;
-      link.click();
-      
-      // Limpiar memoria
-      setTimeout(() => URL.revokeObjectURL(url), 100);
+    // ✅ Lógica corregida para SOLO abrir (Sin .save())
+    window.html2pdf().from(element).set(opt).output('bloburl').then((url) => {
+      window.open(url, '_blank');
     });
   };
 
@@ -263,7 +251,7 @@ const OrdersPage = () => {
       <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
         <div>
           <h1 className="text-3xl font-black text-gray-900 tracking-tight">Pedidos</h1>
-          <p className="text-gray-500 text-sm">Gestiona cobros parciales y productos personalizados.</p>
+          <p className="text-gray-500 text-sm">Gestiona saldos, señas y notas.</p>
         </div>
         <Dialog open={isDialogOpen} onOpenChange={(open) => { if(!open) resetForm(); setIsDialogOpen(open); }}>
           <DialogTrigger asChild>
@@ -276,12 +264,12 @@ const OrdersPage = () => {
                 <div className="space-y-2"><label className="text-xs font-black uppercase text-gray-400 ml-1">Cliente *</label><Input value={orderForm.client_name} onChange={e => setOrderForm({...orderForm, client_name: e.target.value})} placeholder="Nombre completo" className="rounded-xl h-12" required /></div>
                 <div className="space-y-2"><label className="text-xs font-black uppercase text-gray-400 ml-1">Fecha</label><Input type="date" value={orderForm.order_date} onChange={e => setOrderForm({...orderForm, order_date: e.target.value})} className="rounded-xl h-12" /></div>
               </div>
-              <div className="space-y-2"><label className="text-xs font-black uppercase text-gray-400 ml-1">Notas</label><textarea value={orderForm.notes} onChange={e => setOrderForm({...orderForm, notes: e.target.value})} placeholder="Instrucciones especiales..." className="w-full min-h-[80px] rounded-xl border border-input p-3 text-sm focus:ring-2 focus:ring-indigo-500 outline-none" /></div>
+              <div className="space-y-2"><label className="text-xs font-black uppercase text-gray-400 ml-1">Notas</label><textarea value={orderForm.notes} onChange={e => setOrderForm({...orderForm, notes: e.target.value})} placeholder="Detalles extra..." className="w-full min-h-[80px] rounded-xl border border-input p-3 text-sm focus:ring-2 focus:ring-indigo-500 outline-none" /></div>
 
               <div className="space-y-4 border rounded-2xl p-5 bg-gray-50/50 border-gray-100">
-                <h3 className="font-bold text-xs flex items-center gap-2 text-indigo-600 uppercase tracking-widest"><Package className="w-4 h-4" /> Ítems de Inventario</h3>
+                <h3 className="font-bold text-xs flex items-center gap-2 text-indigo-600 uppercase tracking-widest"><Package className="w-4 h-4" /> Desde Inventario</h3>
                 <div className="space-y-3">
-                  <div className="relative"><Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" /><Input placeholder="Buscar en stock..." className="pl-9 rounded-xl h-10 border-gray-200 bg-white" value={productSearch} onChange={e => setProductSearch(e.target.value)} /></div>
+                  <div className="relative"><Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" /><Input placeholder="Buscar producto..." className="pl-9 rounded-xl h-10 border-gray-200 bg-white" value={productSearch} onChange={e => setProductSearch(e.target.value)} /></div>
                   <div className="flex gap-2">
                     <select className="flex h-12 w-full rounded-xl border border-input bg-white px-3 text-sm font-bold focus:ring-2 focus:ring-indigo-500" value={selectedProduct} onChange={e => setSelectedProduct(e.target.value)}>
                       <option value="">Seleccionar...</option>
@@ -294,7 +282,7 @@ const OrdersPage = () => {
               </div>
 
               <div className="space-y-4 border rounded-2xl p-5 bg-gray-50/50 border-gray-100">
-                <h3 className="font-bold text-xs flex items-center gap-2 text-blue-600 uppercase tracking-widest"><Edit className="w-4 h-4" /> Ítem Personalizado</h3>
+                <h3 className="font-bold text-xs flex items-center gap-2 text-blue-600 uppercase tracking-widest"><Edit className="w-4 h-4" /> Personalizado</h3>
                 <div className="grid grid-cols-12 gap-2">
                   <Input placeholder="Nombre" className="col-span-5 rounded-xl h-12" value={customProductForm.name} onChange={e => setCustomProductForm({...customProductForm, name: e.target.value})} />
                   <Input type="number" placeholder="Precio" className="col-span-3 rounded-xl h-12" value={customProductForm.price} onChange={e => setCustomProductForm({...customProductForm, price: e.target.value})} />
@@ -316,12 +304,12 @@ const OrdersPage = () => {
               )}
 
               <div className="grid grid-cols-2 gap-4 bg-indigo-50/30 p-5 rounded-2xl">
-                <div className="space-y-1"><label className="text-[10px] font-black uppercase text-gray-400 ml-1">Moneda</label><select className="flex h-12 w-full rounded-xl border border-input bg-white px-3 font-bold" value={orderForm.currency} onChange={e => setOrderForm({...orderForm, currency: e.target.value})}><option value="ARS">Peso ($)</option><option value="USD">Dólar (US$)</option></select></div>
-                <div className="space-y-1"><label className="text-[10px] font-black uppercase text-gray-400 ml-1">Abonado (Seña)</label><Input type="number" value={orderForm.paid_amount} onFocus={e => e.target.select()} onChange={e => setOrderForm({...orderForm, paid_amount: e.target.value})} className="rounded-xl h-12 bg-white font-bold text-green-600" /></div>
+                <div className="space-y-1"><label className="text-[10px] font-black uppercase text-gray-400 ml-1">Moneda</label><select className="flex h-12 w-full rounded-xl border border-input bg-white px-3 py-2 text-sm font-bold focus:ring-2 focus:ring-indigo-500" value={orderForm.currency} onChange={e => setOrderForm({...orderForm, currency: e.target.value})}><option value="ARS">Peso Argentino ($)</option><option value="USD">Dólar (US$)</option></select></div>
+                <div className="space-y-1"><label className="text-[10px] font-black uppercase text-gray-400 ml-1">Abonado (Seña)</label><Input type="number" value={orderForm.paid_amount} onFocus={e => e.target.select()} onChange={e => setOrderForm({...orderForm, paid_amount: e.target.value})} className="rounded-xl h-12 bg-white font-bold text-green-600 focus:ring-2 focus:ring-green-500" /></div>
               </div>
-              <div className="flex justify-between items-center bg-indigo-600 p-6 rounded-2xl text-white shadow-xl"><span className="font-bold opacity-80 uppercase text-xs">Total del Pedido</span><span className="text-3xl font-black">{orderForm.currency === 'USD' ? 'US$' : '$'}{calculateTotal().toLocaleString('es-AR')}</span></div>
+              <div className="flex justify-between items-center bg-indigo-600 p-6 rounded-2xl text-white shadow-xl shadow-indigo-100"><span className="font-bold opacity-80 uppercase text-xs tracking-widest">Total del Pedido</span><span className="text-3xl font-black">{orderForm.currency === 'USD' ? 'US$' : '$'}{calculateTotal().toLocaleString('es-AR')}</span></div>
             </div>
-            <DialogFooter><Button onClick={handleSubmitOrder} className="bg-indigo-600 hover:bg-indigo-700 rounded-xl h-12 px-8 font-black uppercase text-xs">Guardar Cambios</Button></DialogFooter>
+            <DialogFooter><Button variant="ghost" onClick={() => setIsDialogOpen(false)} className="font-bold rounded-xl">Cancelar</Button><Button onClick={handleSubmitOrder} className="bg-indigo-600 hover:bg-indigo-700 rounded-xl h-12 px-8 font-black uppercase text-xs tracking-wider">Guardar</Button></DialogFooter>
           </DialogContent>
         </Dialog>
       </div>
@@ -329,53 +317,69 @@ const OrdersPage = () => {
       <Card className="bg-white border-gray-100 rounded-3xl overflow-hidden shadow-sm">
         <CardContent className="p-6 flex flex-col md:flex-row gap-6 justify-between items-end">
           <div className="flex flex-wrap gap-4 w-full md:w-auto">
-             <div className="space-y-1"><label className="text-[10px] font-black uppercase text-gray-400 ml-1">Buscar</label><Input placeholder="Cliente..." className="w-64 rounded-xl border-gray-200" value={searchTerm} onChange={e => setSearchTerm(e.target.value)} /></div>
-             <div className="space-y-1"><label className="text-[10px] font-black uppercase text-gray-400 ml-1">Desde</label><Input type="date" className="w-44 rounded-xl border-gray-200" value={dateFilter.start} onChange={e => setDateFilter({...dateFilter, start: e.target.value})} /></div>
-             <div className="space-y-1"><label className="text-[10px] font-black uppercase text-gray-400 ml-1">Hasta</label><Input type="date" className="w-44 rounded-xl border-gray-200" value={dateFilter.end} onChange={e => setDateFilter({...dateFilter, end: e.target.value})} /></div>
+             <div className="space-y-1"><label className="text-[10px] font-black uppercase text-gray-400 ml-1">Buscar</label><div className="relative"><Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" /><Input placeholder="Cliente o nota..." className="pl-9 w-full md:w-64 rounded-xl border-gray-200" value={searchTerm} onChange={e => setSearchTerm(e.target.value)} /></div></div>
+             <div className="space-y-1"><label className="text-[10px] font-black uppercase text-gray-400 ml-1">Desde</label><Input type="date" className="w-full md:w-44 rounded-xl border-gray-200" value={dateFilter.start} onChange={e => setDateFilter({...dateFilter, start: e.target.value})} /></div>
+             <div className="space-y-1"><label className="text-[10px] font-black uppercase text-gray-400 ml-1">Hasta</label><Input type="date" className="w-full md:w-44 rounded-xl border-gray-200" value={dateFilter.end} onChange={e => setDateFilter({...dateFilter, end: e.target.value})} /></div>
+             <Button variant="outline" className="rounded-xl h-10 mt-auto font-bold border-gray-200 text-gray-500 uppercase text-[10px]" onClick={() => { setDateFilter({start:'', end:''}); setSearchTerm(''); }}>Limpiar filtros</Button>
           </div>
           <div className="flex gap-3 w-full md:w-auto">
-             <div className="px-4 py-3 bg-red-50/50 rounded-2xl text-center border border-red-100"><p className="text-[9px] font-black uppercase text-red-400">Pendiente ARS</p><p className="text-lg font-black text-red-600">${summary.pendingARS.toLocaleString('es-AR')}</p></div>
-             <div className="px-4 py-3 bg-indigo-50/50 rounded-2xl text-center border border-indigo-100"><p className="text-[9px] font-black uppercase text-indigo-400">Pendiente USD</p><p className="text-lg font-black text-indigo-600">US${summary.pendingUSD.toLocaleString('es-AR')}</p></div>
+             <div className="px-4 py-3 bg-red-50/50 rounded-2xl border border-red-50 text-center"><p className="text-[9px] font-black uppercase text-red-400 tracking-widest">Pendiente ARS</p><p className="text-lg font-black text-red-600">${summary.pendingARS.toLocaleString('es-AR')}</p></div>
+             <div className="px-4 py-3 bg-indigo-50/50 rounded-2xl border border-indigo-50 text-center"><p className="text-[9px] font-black uppercase text-indigo-400 tracking-widest">Pendiente USD</p><p className="text-lg font-black text-indigo-600">US${summary.pendingUSD.toLocaleString('es-AR')}</p></div>
           </div>
         </CardContent>
       </Card>
 
       <div className="space-y-4">
         {loading ? (
-          <div className="flex flex-col items-center justify-center p-20 text-indigo-500"><Loader2 className="w-10 h-10 animate-spin" /></div>
-        ) : orders.map((order) => {
-          const symbol = order.currency === 'USD' ? 'US$' : '$';
-          return (
-            <motion.div key={order.id} initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="bg-white rounded-3xl p-6 shadow-sm border border-gray-100 hover:border-indigo-100 transition-all">
-              <div className="flex flex-col md:flex-row justify-between gap-6">
-                <div className="flex-1 space-y-3">
-                  <div className="flex items-center gap-3"><h3 className="text-xl font-black text-gray-900">{order.client_name}</h3><span className={`px-3 py-1 rounded-full text-[10px] font-black uppercase ${getStatusColor(order.status)}`}>{order.status}</span></div>
-                  {order.notes && (<div className="flex gap-2 bg-gray-50 p-2 rounded-lg border italic text-xs text-gray-600"><StickyNote className="w-3.5 h-3.5 text-amber-500" />{order.notes}</div>)}
-                  <div className="flex flex-col gap-1 border-l-2 border-indigo-50 pl-3">
-                    {([...(order.products || []), ...(order.custom_products || [])]).map((p, idx) => (
-                      <div key={idx} className="text-[13px] font-medium"><span className="font-black text-indigo-400">{p.quantity}x</span> {p.name}</div>
-                    ))}
-                  </div>
-                </div>
-                <div className="flex flex-col md:items-end justify-between gap-4">
-                  <div className="text-right">
-                    <p className="text-3xl font-black text-gray-900">{symbol}{Number(order.total_amount).toLocaleString('es-AR')}</p>
-                    <div className="text-[11px] font-black flex gap-3 mt-1 justify-end">
-                      <span className="text-green-600">Abonado: {symbol}{Number(order.paid_amount).toLocaleString('es-AR')}</span>
-                      <span className="text-red-600">Saldo: {symbol}{Number(order.pending_amount).toLocaleString('es-AR')}</span>
+          <div className="flex flex-col items-center justify-center p-20 text-indigo-500"><Loader2 className="w-10 h-10 animate-spin mb-4" /><p className="font-bold uppercase text-[10px] tracking-widest">Cargando...</p></div>
+        ) : orders.length === 0 ? (
+          <div className="text-center p-20 bg-white rounded-3xl border border-dashed border-gray-200 text-gray-400 flex flex-col items-center"><Package className="w-12 h-12 mb-4 opacity-20" /><p className="font-medium italic">Sin registros.</p></div>
+        ) : (
+          <>
+            {orders.map((order) => {
+              const symbol = order.currency === 'USD' ? 'US$' : '$';
+              return (
+                <motion.div key={order.id} initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="bg-white rounded-3xl p-6 shadow-sm border border-gray-100 hover:border-indigo-100 transition-all group">
+                  <div className="flex flex-col md:flex-row justify-between gap-6">
+                    <div className="flex-1 space-y-3">
+                      <div className="flex items-center gap-3"><h3 className="text-xl font-black text-gray-900 group-hover:text-indigo-600 transition-colors">{order.client_name}</h3><span className={`px-3 py-1 rounded-full text-[10px] font-black uppercase ${getStatusColor(order.status)}`}>{order.status}</span></div>
+                      {order.notes && (<div className="flex items-start gap-2 bg-gray-50 p-2 rounded-lg border border-gray-100 max-md"><StickyNote className="w-3.5 h-3.5 text-amber-500 mt-1 shrink-0" /><p className="text-xs text-gray-600 line-clamp-2 italic">{order.notes}</p></div>)}
+                      
+                      <div className="flex flex-col gap-1.5 mt-1 border-l-2 border-indigo-50 pl-3">
+                        {([...(order.products || []), ...(order.custom_products || [])]).map((p, idx) => (
+                          <div key={idx} className="flex items-center gap-2 text-gray-700 text-[13px] font-medium leading-tight">
+                            <span className="font-black text-indigo-400">{p.quantity}x</span>
+                            <span className="truncate max-w-[300px]">{p.name}</span>
+                            <span className="text-gray-400 font-normal text-[11px] whitespace-nowrap">({formatCurrency(p.price)})</span>
+                          </div>
+                        ))}
+                      </div>
+
+                      <div className="flex items-center gap-2 text-[10px] text-gray-400 font-bold uppercase tracking-widest"><Calendar className="w-3.5 h-3.5" />{formatDateTime(order.order_date).split(',')[0]}</div>
+                    </div>
+                    
+                    <div className="flex flex-col md:items-end justify-between gap-4">
+                      <div className="text-right space-y-1">
+                        <div className="flex flex-col items-end leading-tight mb-2"><span className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">TOTAL</span><span className="text-4xl font-black text-gray-900 tracking-tighter">{symbol}{Number(order.total_amount).toLocaleString('es-AR')}</span></div>
+                        <div className="flex gap-4 justify-end items-center text-[11px] font-bold uppercase tracking-widest">
+                           <div className="flex gap-1.5 items-center"><span className="text-green-600 opacity-60">ABONADO</span><span className="text-green-600 text-sm font-black">{symbol}{Number(order.paid_amount).toLocaleString('es-AR')}</span></div>
+                           <div className="flex gap-1.5 items-center"><span className="text-red-600 opacity-60">SALDO</span><span className="text-red-600 text-sm font-black">{symbol}{Number(order.pending_amount).toLocaleString('es-AR')}</span></div>
+                        </div>
+                      </div>
+                      <div className="flex gap-2">
+                        {/* Botón de la lista también abre sin descargar */}
+                        <Button size="sm" variant="ghost" className="rounded-xl hover:bg-green-50 font-bold" onClick={() => generatePDF(order)}><FileText className="w-4 h-4 mr-2" /> PDF</Button>
+                        <Button size="sm" variant="ghost" className="rounded-xl hover:bg-indigo-50 font-bold" onClick={() => handleShowDetails(order)}><Eye className="w-4 h-4 mr-2" /> Detalle</Button>
+                        <Button size="sm" variant="ghost" className="rounded-xl hover:bg-yellow-50 font-bold" onClick={() => handleEditOrder(order)}><Edit className="w-4 h-4 mr-2" /> Editar</Button>
+                        <Button size="sm" variant="ghost" className="rounded-xl hover:bg-red-50 text-red-600 font-bold" onClick={() => { if(confirm("¿Eliminar?")) supabase.from('orders').delete().eq('id', order.id).then(() => fetchOrders()); }}><Trash2 className="w-4 h-4" /></Button>
+                      </div>
                     </div>
                   </div>
-                  <div className="flex gap-2">
-                    <Button size="sm" variant="ghost" className="rounded-xl hover:bg-green-50 font-bold" onClick={() => generatePDF(order)}><FileText className="w-4 h-4 mr-2" /> PDF</Button>
-                    <Button size="sm" variant="ghost" className="rounded-xl hover:bg-indigo-50 font-bold" onClick={() => handleShowDetails(order)}><Eye className="w-4 h-4 mr-2" /> Detalle</Button>
-                    <Button size="sm" variant="ghost" className="rounded-xl hover:bg-yellow-50 font-bold" onClick={() => handleEditOrder(order)}><Edit className="w-4 h-4 mr-2" /> Editar</Button>
-                    <Button size="sm" variant="ghost" className="rounded-xl hover:bg-red-50 text-red-600 font-bold" onClick={() => { if(confirm("¿Eliminar?")) supabase.from('orders').delete().eq('id', order.id).then(() => fetchOrders()); }}><Trash2 className="w-4 h-4" /></Button>
-                  </div>
-                </div>
-              </div>
-            </motion.div>
-          );
-        })}
+                </motion.div>
+              );
+            })}
+          </>
+        )}
       </div>
 
       <Dialog open={isDetailsOpen} onOpenChange={setIsDetailsOpen}>
@@ -395,12 +399,12 @@ const OrdersPage = () => {
                 </table>
               </div>
               <div className="bg-indigo-600 p-6 rounded-2xl text-white flex justify-between items-center shadow-lg">
-                <span className="font-bold opacity-80 uppercase text-xs">A cobrar:</span>
+                <span className="font-bold opacity-80 uppercase text-xs">Saldo a cobrar:</span>
                 <span className="text-3xl font-black">{selectedOrder.currency === 'USD' ? 'US$' : '$'}{Number(selectedOrder.pending_amount).toLocaleString('es-AR')}</span>
               </div>
             </div>
           )}
-          <DialogFooter><Button className="w-full bg-green-700 hover:bg-green-800 text-white rounded-xl h-12 font-bold shadow-md" onClick={() => generatePDF(selectedOrder)}><FileText className="w-4 h-4 mr-2" /> Descargar y Abrir PDF</Button></DialogFooter>
+          <DialogFooter><Button className="w-full bg-green-700 hover:bg-green-800 text-white rounded-xl h-12 font-bold shadow-md" onClick={() => generatePDF(selectedOrder)}><FileText className="w-4 h-4 mr-2" /> Abrir PDF</Button></DialogFooter>
         </DialogContent>
       </Dialog>
     </div>
