@@ -217,57 +217,62 @@ const SalesHistoryPage = () => {
         </div>
       </div>
 
+      {/* BLOQUE DE FILTROS Y TOTALES - SOLO VISIBLE PARA OWNER */}
       {isOwner && (
-        <div className="bg-white p-4 rounded-xl shadow-sm border border-gray-200 flex flex-col md:flex-row gap-4 items-end">
-          <div className="space-y-1 flex-1 w-full">
-            <label className="text-xs font-semibold text-gray-500 uppercase">Desde</label>
-            <div className="relative">
-              <Calendar className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
-              <input type="date" className="w-full pl-9 p-2 rounded-lg border border-gray-200 text-sm focus:ring-2 focus:ring-indigo-500 outline-none" value={dateRange.start} onChange={(e) => setDateRange({...dateRange, start: e.target.value})} />
+        <>
+          {/* Filtros */}
+          <div className="bg-white p-4 rounded-xl shadow-sm border border-gray-200 flex flex-col md:flex-row gap-4 items-end">
+            <div className="space-y-1 flex-1 w-full">
+              <label className="text-xs font-semibold text-gray-500 uppercase">Desde</label>
+              <div className="relative">
+                <Calendar className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+                <input type="date" className="w-full pl-9 p-2 rounded-lg border border-gray-200 text-sm focus:ring-2 focus:ring-indigo-500 outline-none" value={dateRange.start} onChange={(e) => setDateRange({...dateRange, start: e.target.value})} />
+              </div>
             </div>
-          </div>
-          <div className="space-y-1 flex-1 w-full">
-            <label className="text-xs font-semibold text-gray-500 uppercase">Hasta</label>
-            <div className="relative">
-              <Calendar className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
-              <input type="date" className="w-full pl-9 p-2 rounded-lg border border-gray-200 text-sm focus:ring-2 focus:ring-indigo-500 outline-none" value={dateRange.end} onChange={(e) => setDateRange({...dateRange, end: e.target.value})} />
+            <div className="space-y-1 flex-1 w-full">
+              <label className="text-xs font-semibold text-gray-500 uppercase">Hasta</label>
+              <div className="relative">
+                <Calendar className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+                <input type="date" className="w-full pl-9 p-2 rounded-lg border border-gray-200 text-sm focus:ring-2 focus:ring-indigo-500 outline-none" value={dateRange.end} onChange={(e) => setDateRange({...dateRange, end: e.target.value})} />
+              </div>
             </div>
+            <div className="space-y-1 flex-1 w-full">
+               <label className="text-xs font-semibold text-gray-500 uppercase">Método de Pago</label>
+               <select 
+                 className="w-full p-2 rounded-lg border border-gray-200 text-sm focus:ring-2 focus:ring-indigo-500 outline-none bg-white"
+                 value={paymentFilter}
+                 onChange={(e) => setPaymentFilter(e.target.value)}
+               >
+                 <option value="all">Todos los métodos</option>
+                 {paymentMethods.map(m => (
+                   <option key={m.name} value={m.name}>{m.name}</option>
+                 ))}
+               </select>
+            </div>
+            <Button onClick={() => { setPage(0); fetchSales(); }} className="w-full md:w-auto bg-indigo-600 hover:bg-indigo-700">
+              <Search className="w-4 h-4 mr-2" /> Filtrar
+            </Button>
           </div>
-          <div className="space-y-1 flex-1 w-full">
-             <label className="text-xs font-semibold text-gray-500 uppercase">Método de Pago</label>
-             <select 
-               className="w-full p-2 rounded-lg border border-gray-200 text-sm focus:ring-2 focus:ring-indigo-500 outline-none bg-white"
-               value={paymentFilter}
-               onChange={(e) => setPaymentFilter(e.target.value)}
-             >
-               <option value="all">Todos los métodos</option>
-               {paymentMethods.map(m => (
-                 <option key={m.name} value={m.name}>{m.name}</option>
-               ))}
-             </select>
-          </div>
-          <Button onClick={() => { setPage(0); fetchSales(); }} className="w-full md:w-auto bg-indigo-600 hover:bg-indigo-700">
-            <Search className="w-4 h-4 mr-2" /> Filtrar
-          </Button>
-        </div>
-      )}
 
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-        <div className="bg-white p-4 rounded-xl shadow-sm border border-gray-200">
-          <p className="text-xs text-gray-500 uppercase font-black tracking-widest mb-1">Total General {isOwner ? '(Periodo)' : '(Hoy)'}</p>
-          <p className="text-2xl font-black text-gray-900">{formatCurrency(summaryData.total)}</p>
-        </div>
-        
-        {Object.entries(summaryData.byMethod).map(([method, total], idx) => (
-          <div key={method} className={`${idx % 2 === 0 ? 'bg-green-50 border-green-100 text-green-800' : 'bg-blue-50 border-blue-100 text-blue-800'} p-4 rounded-xl shadow-sm border`}>
-            <div className="flex items-center gap-2 mb-1">
-               <Wallet className="w-3 h-3" />
-               <p className="text-xs uppercase font-black tracking-widest truncate">{method}</p>
+          {/* Tarjetas de Totales */}
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+            <div className="bg-white p-4 rounded-xl shadow-sm border border-gray-200">
+              <p className="text-xs text-gray-500 uppercase font-black tracking-widest mb-1">Total General (Periodo)</p>
+              <p className="text-2xl font-black text-gray-900">{formatCurrency(summaryData.total)}</p>
             </div>
-            <p className="text-2xl font-black">{formatCurrency(total)}</p>
+            
+            {Object.entries(summaryData.byMethod).map(([method, total], idx) => (
+              <div key={method} className={`${idx % 2 === 0 ? 'bg-green-50 border-green-100 text-green-800' : 'bg-blue-50 border-blue-100 text-blue-800'} p-4 rounded-xl shadow-sm border`}>
+                <div className="flex items-center gap-2 mb-1">
+                   <Wallet className="w-3 h-3" />
+                   <p className="text-xs uppercase font-black tracking-widest truncate">{method}</p>
+                </div>
+                <p className="text-2xl font-black">{formatCurrency(total)}</p>
+              </div>
+            ))}
           </div>
-        ))}
-      </div>
+        </>
+      )}
 
       <div className="bg-white rounded-2xl shadow-md border border-gray-200 overflow-hidden">
         <div className="overflow-x-auto">

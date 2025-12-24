@@ -159,7 +159,7 @@ const OrdersPage = () => {
     setIsDetailsOpen(true);
   };
 
-  // ✅ GENERACIÓN DE PDF: Solo abrir en pestaña nueva (Sin descarga automática)
+  // ✅ GENERACIÓN DE PDF: Corregido para abrir en nueva pestaña usando el visor del navegador
   const generatePDF = (order) => {
     const currencySymbol = order.currency === 'USD' ? 'US$' : '$';
     const allProducts = [...(order.products || []), ...(order.custom_products || [])];
@@ -181,7 +181,6 @@ const OrdersPage = () => {
           </div>
           <div style="text-align: right;">
             <p style="margin: 5px 0;"><strong style="text-transform: uppercase; color: #555;">ESTADO:</strong> ${order.status.toUpperCase()}</p>
-            <p style="margin: 5px 0;"><strong style="text-transform: uppercase; color: #555;">ID:</strong> #${order.id.slice(0,8).toUpperCase()}</p>
           </div>
         </div>
 
@@ -234,13 +233,28 @@ const OrdersPage = () => {
       margin: 0,
       filename: `Pedido_${order.client_name.replace(/\s+/g, '_')}.pdf`,
       image: { type: 'jpeg', quality: 0.98 },
-      html2canvas: { scale: 2, useCORS: true },
+      html2canvas: { scale: 2, useCORS: true, logging: false },
       jsPDF: { unit: 'in', format: 'A4', orientation: 'portrait' }
     };
 
-    // ✅ Lógica corregida para SOLO abrir (Sin .save())
-    window.html2pdf().from(element).set(opt).output('bloburl').then((url) => {
-      window.open(url, '_blank');
+    // 1. Abrimos ventana vacía inmediatamente para evitar bloqueo de pop-ups
+    const pdfWindow = window.open("", "_blank");
+    if (pdfWindow) {
+      pdfWindow.document.write("<title>Generando Pedido...</title><body style='display:flex; justify-content:center; align-items:center; height:100vh; font-family:sans-serif; color:#666;'>Cargando visor de PDF...</body>");
+    }
+
+    // 2. Generamos el PDF
+    window.html2pdf().from(element).set(opt).toPdf().get('pdf').then((pdf) => {
+      const blob = pdf.output('blob');
+      const file = new Blob([blob], { type: 'application/pdf' });
+      const fileURL = URL.createObjectURL(file);
+      
+      if (pdfWindow) {
+        // 3. Redirigimos la ventana al PDF
+        pdfWindow.location.href = fileURL;
+      } else {
+        window.open(fileURL, '_blank');
+      }
     });
   };
 
@@ -362,12 +376,11 @@ const OrdersPage = () => {
                       <div className="text-right space-y-1">
                         <div className="flex flex-col items-end leading-tight mb-2"><span className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">TOTAL</span><span className="text-4xl font-black text-gray-900 tracking-tighter">{symbol}{Number(order.total_amount).toLocaleString('es-AR')}</span></div>
                         <div className="flex gap-4 justify-end items-center text-[11px] font-bold uppercase tracking-widest">
-                           <div className="flex gap-1.5 items-center"><span className="text-green-600 opacity-60">ABONADO</span><span className="text-green-600 text-sm font-black">{symbol}{Number(order.paid_amount).toLocaleString('es-AR')}</span></div>
-                           <div className="flex gap-1.5 items-center"><span className="text-red-600 opacity-60">SALDO</span><span className="text-red-600 text-sm font-black">{symbol}{Number(order.pending_amount).toLocaleString('es-AR')}</span></div>
+                            <div className="flex gap-1.5 items-center"><span className="text-green-600 opacity-60">ABONADO</span><span className="text-green-600 text-sm font-black">{symbol}{Number(order.paid_amount).toLocaleString('es-AR')}</span></div>
+                            <div className="flex gap-1.5 items-center"><span className="text-red-600 opacity-60">SALDO</span><span className="text-red-600 text-sm font-black">{symbol}{Number(order.pending_amount).toLocaleString('es-AR')}</span></div>
                         </div>
                       </div>
                       <div className="flex gap-2">
-                        {/* Botón de la lista también abre sin descargar */}
                         <Button size="sm" variant="ghost" className="rounded-xl hover:bg-green-50 font-bold" onClick={() => generatePDF(order)}><FileText className="w-4 h-4 mr-2" /> PDF</Button>
                         <Button size="sm" variant="ghost" className="rounded-xl hover:bg-indigo-50 font-bold" onClick={() => handleShowDetails(order)}><Eye className="w-4 h-4 mr-2" /> Detalle</Button>
                         <Button size="sm" variant="ghost" className="rounded-xl hover:bg-yellow-50 font-bold" onClick={() => handleEditOrder(order)}><Edit className="w-4 h-4 mr-2" /> Editar</Button>
