@@ -2,8 +2,8 @@ import React, { useState, useEffect } from 'react';
 import { useParams } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { 
-  Calendar, Search, Trash2, Edit, Receipt,
-  ChevronLeft, ChevronRight, CreditCard, Wallet, Loader2 
+  Calendar, Search, Trash2, Edit,
+  ChevronLeft, ChevronRight, Wallet, Loader2 
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { toast } from '@/components/ui/use-toast';
@@ -195,20 +195,6 @@ const SalesHistoryPage = () => {
     }
   };
 
-  const printTicket = (sale) => {
-    const ticketContent = `
-      <html><head><title>Ticket</title><style>body{font-family:'Courier New',monospace;font-size:12px;width:280px;padding:10px}h3,p{margin:0}.text-center{text-align:center}.divider{border-top:1px dashed #000;margin:10px 0}.flex{display:flex;justify-content:space-between}</style></head><body>
-      <div class="text-center"><h3>${branchName}</h3><p>${formatDateTime(sale.created_at)}</p></div><div class="divider"></div>
-      ${sale.sale_items?.map(item => `<div class="flex"><span>${item.quantity}x ${item.product_name}</span><span>$${(item.unit_price * item.quantity).toLocaleString('es-AR')}</span></div>`).join('')}
-      <div class="divider"></div><div class="flex" style="font-weight: bold;"><span>TOTAL</span><span>${formatCurrency(sale.total)}</span></div>
-      <p class="text-center" style="font-size: 10px; margin-top: 20px;">Gracias por su compra</p>
-      <script>window.onload = () => { window.print(); window.close(); }</script></body></html>
-    `;
-    const win = window.open('', '', 'width=400,height=600');
-    win.document.write(ticketContent);
-    win.document.close();
-  };
-
   if (roleLoading) {
     return (
       <div className="flex flex-col items-center justify-center h-64 gap-3 text-gray-500">
@@ -266,7 +252,6 @@ const SalesHistoryPage = () => {
         </div>
       )}
 
-      {/* Resumen */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
         <div className="bg-white p-4 rounded-xl shadow-sm border border-gray-200">
           <p className="text-xs text-gray-500 uppercase font-black tracking-widest mb-1">Total General {isOwner ? '(Periodo)' : '(Hoy)'}</p>
@@ -284,7 +269,6 @@ const SalesHistoryPage = () => {
         ))}
       </div>
 
-      {/* ✅ TABLA MEJORADA: MÁS GRANDE Y LEGIBLE */}
       <div className="bg-white rounded-2xl shadow-md border border-gray-200 overflow-hidden">
         <div className="overflow-x-auto">
           <table className="w-full text-left border-collapse">
@@ -347,9 +331,6 @@ const SalesHistoryPage = () => {
                     </td>
                     <td className="px-6 py-6 align-top">
                       <div className="flex items-center justify-center gap-3">
-                        <button onClick={() => printTicket(sale)} className="p-2.5 rounded-xl border border-gray-200 text-gray-400 hover:bg-indigo-50 hover:text-indigo-600 transition-all">
-                          <Receipt className="w-5 h-5" />
-                        </button>
                         {isOwner && (
                           <>
                             <button onClick={() => openEdit(sale)} className="p-2.5 rounded-xl border border-gray-200 text-gray-400 hover:bg-yellow-50 hover:text-yellow-600 transition-all">

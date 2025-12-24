@@ -7,18 +7,11 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { 
   Search, ShoppingCart, Trash2, Plus, Minus, 
-  Loader2, Tag, Receipt, ChevronLeft, ChevronRight, Edit3 
+  Loader2, Tag, ChevronLeft, ChevronRight, Edit3 
 } from 'lucide-react';
 import { supabase } from '@/lib/customSupabaseClient';
 import { toast } from '@/components/ui/use-toast';
-import { formatCurrency, formatDateTime } from '@/lib/utils';
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DialogFooter,
-} from "@/components/ui/dialog";
+import { formatCurrency } from '@/lib/utils';
 
 const SalesModule = () => {
   const { branchId } = useParams();
@@ -31,11 +24,9 @@ const SalesModule = () => {
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedCategory, setSelectedCategory] = useState('all');
   
-  // ✅ ESTADOS PARA PRODUCTO PERSONALIZADO
   const [customName, setCustomName] = useState('');
   const [customPrice, setCustomPrice] = useState('');
 
-  // ✅ ESTADOS DE PAGINACIÓN
   const [currentPage, setCurrentPage] = useState(1);
   const [totalCount, setTotalCount] = useState(0);
   const itemsPerPage = 20;
@@ -43,9 +34,7 @@ const SalesModule = () => {
   const [cart, setCart] = useState([]);
   const [selectedPaymentMethod, setSelectedPaymentMethod] = useState(null);
   const [isProcessing, setIsProcessing] = useState(false);
-  const [lastSale, setLastSale] = useState(null);
   const [branchDetails, setBranchDetails] = useState(null);
-  const [isTicketDialogOpen, setIsTicketDialogOpen] = useState(false);
 
   const fetchProducts = useCallback(async () => {
     if (!branchId) return;
@@ -128,7 +117,6 @@ const SalesModule = () => {
     });
   };
 
-  // ✅ FUNCIÓN PARA AÑADIR PRODUCTO PERSONALIZADO
   const addCustomToCart = () => {
     if (!customName.trim() || !customPrice || Number(customPrice) <= 0) {
       toast({ title: "Faltan datos", description: "Ingresa nombre y precio válido", variant: "destructive" });
@@ -174,8 +162,7 @@ const SalesModule = () => {
         branch_id: branchId,
         customer_name: 'Cliente General',
         total: total,
-        payment_method: selectedPaymentMethod.name,
-        receipt_generated: false
+        payment_method: selectedPaymentMethod.name
       }]).select().single();
       if (saleError) throw saleError;
 
@@ -191,7 +178,6 @@ const SalesModule = () => {
       const { error: itemsError } = await supabase.from('sale_items').insert(saleItems);
       if (itemsError) throw itemsError;
 
-      // ✅ Descontar stock SOLO de productos de inventario
       const stockItemsToUpdate = cart.filter(i => !i.is_custom);
       if (stockItemsToUpdate.length > 0) {
         const stockPayload = stockItemsToUpdate.map(i => ({
@@ -207,8 +193,6 @@ const SalesModule = () => {
       }
 
       toast({ title: "Venta realizada con éxito" });
-      setLastSale({ ...sale, sale_items: saleItems, payment_method: selectedPaymentMethod.name });
-      setIsTicketDialogOpen(true);
       setCart([]);
       fetchProducts();
     } catch (error) {
@@ -219,7 +203,6 @@ const SalesModule = () => {
     }
   };
 
-  // ✅ DEFINICIÓN DE totalPages (Esto arregla el error de la imagen)
   const totalPages = Math.ceil(totalCount / itemsPerPage);
 
   return (
@@ -236,7 +219,6 @@ const SalesModule = () => {
         <TabsContent value="new-sale" className="flex-1 overflow-hidden mt-0">
           <div className="flex flex-col lg:grid lg:grid-cols-12 gap-6 h-full overflow-y-auto lg:overflow-hidden px-1">
             
-            {/* Sección de Productos */}
             <div className="order-2 lg:order-1 lg:col-span-8 flex flex-col h-full bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
               <div className="p-3 md:p-4 border-b border-gray-100 bg-gray-50/50 space-y-3">
                 <div className="relative">
@@ -274,7 +256,6 @@ const SalesModule = () => {
                 )}
               </div>
 
-              {/* Navegación */}
               {!loading && totalPages > 1 && (
                 <div className="p-3 border-t border-gray-100 flex justify-between items-center bg-white shrink-0">
                   <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest">Total: {totalCount} Productos</p>
@@ -287,7 +268,6 @@ const SalesModule = () => {
               )}
             </div>
 
-            {/* Carrito */}
             <div className="order-1 lg:order-2 lg:col-span-4 flex flex-col h-auto lg:h-full bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden min-h-[400px]">
               <div className="p-4 border-b border-gray-100 bg-gray-50/50 flex items-center gap-2">
                 <ShoppingCart className="w-5 h-5 text-indigo-600" />
@@ -295,7 +275,6 @@ const SalesModule = () => {
                 {cart.length > 0 && <span className="ml-auto bg-indigo-600 text-white text-[10px] px-2 py-0.5 rounded-full">{cart.length}</span>}
               </div>
 
-              {/* ✅ SECCIÓN PRODUCTO PERSONALIZADO */}
               <div className="p-3 bg-indigo-50/50 border-b border-indigo-100 space-y-2">
                 <p className="text-[10px] font-bold text-indigo-600 uppercase flex items-center gap-1">
                   <Edit3 className="w-3 h-3" /> Añadir Personalizado

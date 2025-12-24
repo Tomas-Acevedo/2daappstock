@@ -53,7 +53,7 @@ export default function GlobalScanListener() {
         let avg = 1000;
         if (times.length >= 2) avg = (times[times.length - 1] - times[0]) / (times.length - 1);
 
-        if (avg <= 60) {
+        if (avg <= 120) {
           e.preventDefault();
           e.stopPropagation();
           e.stopImmediatePropagation(); 

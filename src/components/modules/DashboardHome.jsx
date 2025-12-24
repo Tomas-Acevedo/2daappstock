@@ -3,8 +3,8 @@ import { useParams } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { 
   TrendingUp, Users, DollarSign, ShoppingBag, 
-  Calendar as CalendarIcon, Clock, Filter, CreditCard,
-  Trash2, Eye, Receipt, ChevronLeft, ChevronRight
+  Calendar as CalendarIcon, Clock, CreditCard,
+  Trash2, ChevronLeft, ChevronRight
 } from 'lucide-react';
 import { supabase } from '@/lib/customSupabaseClient';
 import { formatCurrency, formatDateTime, getArgentinaDate } from '@/lib/utils';
@@ -12,8 +12,8 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from '@/components/ui/button';
 import { toast } from '@/components/ui/use-toast';
 
-// ✅ TABLA ACTUALIZADA: Lista TODOS los productos sin excepción
-const SalesTable = ({ sales, loading, onDelete, onPrint, paymentMethods }) => {
+// ✅ TABLA ACTUALIZADA: Sin botón de impresión
+const SalesTable = ({ sales, loading, onDelete, paymentMethods }) => {
   if (loading) {
     return <div className="text-center p-10 text-lg text-gray-400 font-medium">Cargando ventas...</div>;
   }
@@ -52,7 +52,6 @@ const SalesTable = ({ sales, loading, onDelete, onPrint, paymentMethods }) => {
                 </td>
                 <td className="px-6 py-6 align-top">
                   <div className="flex flex-col gap-2">
-                    {/* ✅ Se eliminó el .slice() para mostrar la lista completa */}
                     {sale.sale_items?.map((item, idx) => (
                       <span key={idx} className="text-sm text-gray-800 font-bold max-w-[350px] flex items-start gap-2">
                         <span className="text-indigo-600 font-black min-w-[25px]">{item.quantity}x</span> 
@@ -85,9 +84,6 @@ const SalesTable = ({ sales, loading, onDelete, onPrint, paymentMethods }) => {
                 </td>
                 <td className="px-6 py-6 align-top">
                   <div className="flex items-center justify-center gap-3">
-                    <Button variant="outline" size="icon" className="h-10 w-10 rounded-xl border-gray-200 hover:bg-indigo-50 hover:text-indigo-600 transition-all" onClick={() => onPrint(sale)}>
-                      <Receipt className="w-5 h-5" />
-                    </Button>
                     <Button variant="outline" size="icon" className="h-10 w-10 rounded-xl border-gray-200 hover:bg-red-50 hover:text-red-600 transition-all" onClick={() => onDelete(sale)}>
                       <Trash2 className="w-5 h-5 text-red-500" />
                     </Button>
@@ -105,28 +101,21 @@ const SalesTable = ({ sales, loading, onDelete, onPrint, paymentMethods }) => {
 const DashboardHome = () => {
   const { branchId } = useParams();
   
-  const [metrics, setMetrics] = useState({ periodSales: 0, orderCount: 0, customerCount: 0, averageTicket: 0 });
+  const [metrics, setMetrics] = useState({ periodSales: 0, orderCount: 0, customerCount: 0, averageSale: 0 });
   const [salesData, setSalesData] = useState([]);
   const [dateRange, setDateRange] = useState({ start: getArgentinaDate(), end: getArgentinaDate() });
   const [timeRange, setTimeRange] = useState({ start: '00:00', end: '23:59' });
   const [selectedPaymentMethod, setSelectedPaymentMethod] = useState('all');
   const [availableMethods, setAvailableMethods] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [branchDetails, setBranchDetails] = useState(null);
 
   useEffect(() => {
-    fetchBranchDetails();
     fetchPaymentMethods();
   }, [branchId]);
 
   useEffect(() => {
     fetchDashboardData();
   }, [branchId, dateRange, timeRange, selectedPaymentMethod]);
-
-  const fetchBranchDetails = async () => {
-    const { data } = await supabase.from('branches').select('name').eq('id', branchId).single();
-    if (data) setBranchDetails(data);
-  };
 
   const fetchPaymentMethods = async () => {
     const { data } = await supabase.from('payment_methods').select('id, name, discount_percentage').eq('branch_id', branchId).eq('is_active', true);
@@ -161,7 +150,7 @@ const DashboardHome = () => {
         periodSales: salesTotal,
         orderCount: data.length,
         customerCount: uniqueCustomers,
-        averageTicket: data.length > 0 ? salesTotal / data.length : 0
+        averageSale: data.length > 0 ? salesTotal / data.length : 0
       });
     } catch (error) {
       console.error("Error fetching dashboard data:", error);
@@ -191,22 +180,6 @@ const DashboardHome = () => {
     } catch (error) {
       toast({ title: "Error al eliminar venta", variant: "destructive" });
     }
-  };
-  
-  const printTicket = (sale) => {
-    const ticketContent = `
-      <html><head><title>Ticket</title><style>body{font-family:'Courier New',monospace;font-size:12px;max-width:300px;margin:0 auto;padding:10px}h3,p{margin:0}.header{text-align:center;margin-bottom:10px}.divider{border-top:1px dashed #000;margin:10px 0}.item,.total{display:flex;justify-content:space-between}.item{margin-bottom:5px}.total{font-weight:700;font-size:14px;margin-top:10px}.footer{text-align:center;margin-top:20px;font-size:10px}img{display:block;margin:10px auto;width:80px;height:80px}</style></head><body>
-      <div class="header"><h3>${branchDetails?.name || 'Sucursal'}</h3><p>${formatDateTime(sale.created_at)}</p>${sale.customer_name ? `<p>Cliente: ${sale.customer_name}</p>`:''}</div><div class="divider"></div>
-      ${sale.sale_items?.map(item=>`<div class="item"><span>${item.quantity}x ${item.product_name}</span><span>$${(item.unit_price*item.quantity).toLocaleString('es-AR')}</span></div>`).join('')||''}
-      <div class="divider"></div><div class="total"><span>TOTAL</span><span>${formatCurrency(sale.total)}</span></div>
-      <div class="item" style="margin-top:5px;font-size:11px"><span>Método:</span><span>${sale.payment_method}</span></div>
-      <img src="https://api.qrserver.com/v1/create-qr-code/?size=150x150&data=${sale.id}" alt="QR Code">
-      <div class="footer"><p>¡Gracias por su compra!</p></div>
-      <script>window.onload=function(){window.print();window.close()}</script></body></html>
-    `;
-    const printWindow = window.open('','','height=600,width=400');
-    printWindow.document.write(ticketContent);
-    printWindow.document.close();
   };
 
   return (
@@ -241,7 +214,7 @@ const DashboardHome = () => {
         {[
           { title: "Ventas (Periodo)", value: formatCurrency(metrics.periodSales), desc: "Total facturado en rango", icon: DollarSign, color: "text-green-600" },
           { title: "Transacciones", value: metrics.orderCount, desc: "Ventas realizadas", icon: ShoppingBag, color: "text-indigo-600" },
-          { title: "Ticket Promedio", value: formatCurrency(metrics.averageTicket), desc: "Promedio por venta", icon: TrendingUp, color: "text-blue-600" },
+          { title: "Promedio por Venta", value: formatCurrency(metrics.averageSale), desc: "Ticket promedio", icon: TrendingUp, color: "text-blue-600" },
           { title: "Clientes Únicos", value: metrics.customerCount, desc: "En el periodo seleccionado", icon: Users, color: "text-orange-600" }
         ].map((item, i) => (
           <motion.div key={i} initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.1 * (i+1) }}>
@@ -263,7 +236,6 @@ const DashboardHome = () => {
         sales={salesData} 
         loading={loading} 
         onDelete={handleDeleteSale} 
-        onPrint={printTicket} 
         paymentMethods={availableMethods}
       />
     </div>

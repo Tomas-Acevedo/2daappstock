@@ -1,9 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import { useParams } from 'react-router-dom';
 import { motion } from 'framer-motion';
-import { Wallet, Plus, Minus, Calendar, DollarSign, Trash2, AlertCircle, Loader2, Clock, Package, ShieldCheck } from 'lucide-react';
+import { Wallet, Plus, Minus, Calendar, DollarSign, Trash2, AlertCircle, Loader2, Clock, Package, ShieldCheck, CreditCard } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input'; // ✅ ESTA IMPORTACIÓN FALTABA
+import { Input } from '@/components/ui/input'; 
 import { toast } from '@/components/ui/use-toast';
 import { formatCurrency, formatDateTime, getArgentinaDate } from '@/lib/utils';
 import { useAuth } from '@/contexts/AuthContext';
@@ -32,10 +32,9 @@ const CashRegister = () => {
   const [expenseForm, setExpenseForm] = useState({ amount: 0, description: '' });
 
   const formatDateDMY = (dateStr) => {
-  const [year, month, day] = dateStr.split("-");
-  return `${day}/${month}/${year}`;
-};
-
+    const [year, month, day] = dateStr.split("-");
+    return `${day}/${month}/${year}`;
+  };
 
   const getDayRange = (dateString) => {
     return {
@@ -60,7 +59,15 @@ const CashRegister = () => {
       setRegisterData(currentRegister);
 
       if (currentRegister) {
-        const { data: sales } = await supabase.from('sales').select('*, sale_items(product_name, quantity)').eq('branch_id', branchId).ilike('payment_method', '%efectivo%').gte('created_at', start).lte('created_at', end).order('created_at', { ascending: false });
+        const { data: sales } = await supabase
+          .from('sales')
+          .select('*, sale_items(product_name, quantity, unit_price)')
+          .eq('branch_id', branchId)
+          .ilike('payment_method', '%efectivo%')
+          .gte('created_at', start)
+          .lte('created_at', end)
+          .order('created_at', { ascending: false });
+          
         setCashSales(sales || []);
         const { data: exp } = await supabase.from('cash_expenses').select('*').eq('branch_id', branchId).gte('created_at', start).lte('created_at', end).order('created_at', { ascending: false });
         setExpenses(exp || []);
@@ -128,9 +135,8 @@ const CashRegister = () => {
           <div className="flex items-center gap-2 bg-indigo-50 border border-indigo-100 p-2.5 rounded-xl text-indigo-600">
             <Clock className="w-4 h-4" />
             <span className="text-sm font-bold uppercase">
-  Jornada Actual ({formatDateDMY(selectedDate)})
-</span>
-
+              Jornada Actual ({formatDateDMY(selectedDate)})
+            </span>
           </div>
         )}
       </div>
@@ -141,9 +147,8 @@ const CashRegister = () => {
           <h2 className="text-xl font-semibold text-gray-900 mb-2">No hay registros para este día</h2>
           {(selectedDate === getArgentinaDate() || isOwner) ? (
             <Button onClick={() => setIsStartDialogOpen(true)} className="bg-green-600 mt-4">
-  {formatDateDMY(selectedDate)} Abrir Caja
-</Button>
-
+              {formatDateDMY(selectedDate)} Abrir Caja
+            </Button>
           ) : <p className="text-amber-600 font-medium mt-4">Solo puedes operar la caja del día actual.</p>}
         </div>
       ) : (
@@ -163,21 +168,43 @@ const CashRegister = () => {
             </div>
           </div>
 
-          <Button onClick={() => setIsExpenseDialogOpen(true)} className="bg-red-600"><Minus className="w-4 h-4 mr-2" /> Registrar Egreso</Button>
+          <Button onClick={() => setIsExpenseDialogOpen(true)} className="bg-red-600"><Plus className="w-4 h-4 mr-2 rotate-45" /> Registrar Egreso</Button>
 
           {/* Listado de Ventas */}
           <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden tabular-nums">
             <div className="p-4 border-b bg-gray-50/50 flex justify-between items-center">
               <h3 className="font-semibold text-green-600 text-sm uppercase tracking-wider">Ventas en Efectivo</h3>
-              <span className="font-bold">{formatCurrency(totalSales)}</span>
+              <span className="font-bold text-lg">{formatCurrency(totalSales)}</span>
             </div>
             <div className="divide-y divide-gray-100">
               {cashSales.length === 0 ? <div className="p-8 text-center text-gray-400">Sin ventas registradas</div> : 
                cashSales.map(sale => (
-                <div key={sale.id} className="p-4 hover:bg-gray-50">
+                <div key={sale.id} className="p-5 hover:bg-gray-50 transition-colors">
                   <div className="flex justify-between items-start">
-                    <div><p className="font-bold text-sm">{sale.customer_name === 'Cliente General' ? 'Venta Mostrador' : sale.customer_name}</p><span className="text-[11px] text-gray-400 uppercase">{formatDateTime(sale.created_at).split(',')[1]}</span></div>
-                    <span className="text-base font-bold text-green-600">+{formatCurrency(sale.total)}</span>
+                    <div className="space-y-1.5 flex-1">
+                      <div>
+                        {/* ✅ NOMBRE Y MÉTODO DE PAGO */}
+                        <div className="flex items-center gap-2 mb-0.5">
+                            <p className="font-bold text-gray-900">{sale.customer_name === 'Cliente General' ? 'Venta Mostrador' : sale.customer_name}</p>
+                            <span className="px-1.5 py-0.5 rounded text-[9px] font-black uppercase bg-indigo-50 text-indigo-600 border border-indigo-100">
+                                {sale.payment_method}
+                            </span>
+                        </div>
+                        <span className="text-[11px] text-gray-400 uppercase font-medium">{formatDateTime(sale.created_at).split(',')[1]} hs</span>
+                      </div>
+                      
+                      {/* PRODUCTOS */}
+                      <div className="flex flex-col gap-1 mt-2 border-l-2 border-indigo-100 pl-3">
+                        {sale.sale_items?.map((item, idx) => (
+                          <div key={idx} className="text-xs text-gray-600 flex items-center gap-1.5 font-medium leading-tight">
+                            <span className="text-indigo-600 font-black">{item.quantity}x</span>
+                            <span>{item.product_name}</span>
+                            <span className="text-gray-400 font-normal">({formatCurrency(item.unit_price)})</span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                    <span className="text-xl font-black text-green-600 tracking-tighter">+{formatCurrency(sale.total)}</span>
                   </div>
                 </div>
               ))}
@@ -188,13 +215,22 @@ const CashRegister = () => {
           <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden tabular-nums">
             <div className="p-4 border-b bg-gray-50/50 flex justify-between items-center">
               <h3 className="font-semibold text-red-600 text-sm uppercase tracking-wider">Egresos de Caja</h3>
-              <span className="font-bold">{formatCurrency(totalExpenses)}</span>
+              <span className="font-bold text-lg">{formatCurrency(totalExpenses)}</span>
             </div>
             <div className="divide-y divide-gray-100">
-              {expenses.map(expense => (
-                <div key={expense.id} className="p-4 flex justify-between items-center">
-                  <div><p className="font-medium text-sm">{expense.description}</p><p className="text-[11px] text-gray-400">{formatDateTime(expense.created_at).split(',')[1]}</p></div>
-                  <div className="flex items-center gap-4"><span className="font-bold text-red-600">-{formatCurrency(expense.amount)}</span><button onClick={() => handleDeleteExpense(expense.id)} className="text-gray-300 hover:text-red-600"><Trash2 className="w-4 h-4" /></button></div>
+              {expenses.length === 0 ? <div className="p-8 text-center text-gray-400">Sin egresos registrados</div> : 
+               expenses.map(expense => (
+                <div key={expense.id} className="p-4 flex justify-between items-center hover:bg-red-50/30 transition-colors">
+                  <div>
+                    <p className="font-bold text-gray-900">{expense.description}</p>
+                    <p className="text-[11px] text-gray-400 font-medium uppercase">{formatDateTime(expense.created_at).split(',')[1]} hs</p>
+                  </div>
+                  <div className="flex items-center gap-4">
+                    <span className="text-lg font-black text-red-600">-{formatCurrency(expense.amount)}</span>
+                    <button onClick={() => handleDeleteExpense(expense.id)} className="p-2 text-gray-300 hover:text-red-600 hover:bg-white rounded-lg transition-all shadow-sm border border-transparent hover:border-red-100">
+                      <Trash2 className="w-4 h-4" />
+                    </button>
+                  </div>
                 </div>
               ))}
             </div>
@@ -204,21 +240,34 @@ const CashRegister = () => {
 
       {/* Diálogos */}
       <Dialog open={isStartDialogOpen} onOpenChange={setIsStartDialogOpen}>
-        <DialogContent className="bg-white">
-          <DialogHeader><DialogTitle>Abrir Caja</DialogTitle></DialogHeader>
-          <div className="py-4"><label className="text-sm font-medium">Monto Inicial</label><Input type="number" value={openingBalance} onChange={(e) => setOpeningBalance(Number(e.target.value))} /></div>
-          <DialogFooter><Button onClick={handleStartRegister} className="bg-green-600 text-white">Iniciar Jornada</Button></DialogFooter>
+        <DialogContent className="bg-white rounded-2xl">
+          <DialogHeader><DialogTitle className="text-xl font-bold">Abrir Caja</DialogTitle></DialogHeader>
+          <div className="py-4 space-y-2">
+            <label className="text-xs font-black uppercase text-gray-400">Monto Inicial</label>
+            <Input type="number" value={openingBalance} onFocus={e => e.target.select()} onChange={(e) => setOpeningBalance(Number(e.target.value))} className="h-12 rounded-xl text-lg font-bold" />
+          </div>
+          <DialogFooter>
+            <Button onClick={handleStartRegister} className="w-full h-12 bg-green-600 hover:bg-green-700 text-white font-black uppercase text-xs tracking-widest rounded-xl">Iniciar Jornada</Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
 
       <Dialog open={isExpenseDialogOpen} onOpenChange={setIsExpenseDialogOpen}>
-        <DialogContent className="bg-white">
-          <DialogHeader><DialogTitle>Nuevo Egreso</DialogTitle></DialogHeader>
+        <DialogContent className="bg-white rounded-2xl">
+          <DialogHeader><DialogTitle className="text-xl font-bold">Nuevo Egreso</DialogTitle></DialogHeader>
           <div className="py-4 space-y-4">
-            <div><label className="text-sm font-medium">Descripción</label><Input value={expenseForm.description} onChange={(e) => setExpenseForm({...expenseForm, description: e.target.value})} /></div>
-            <div><label className="text-sm font-medium">Monto</label><Input type="number" value={expenseForm.amount} onChange={(e) => setExpenseForm({...expenseForm, amount: Number(e.target.value)})} /></div>
+            <div className="space-y-1.5">
+              <label className="text-xs font-black uppercase text-gray-400 ml-1">Descripción</label>
+              <Input value={expenseForm.description} onChange={(e) => setExpenseForm({...expenseForm, description: e.target.value})} placeholder="Ej: Pago a proveedor, flete..." className="h-12 rounded-xl" />
+            </div>
+            <div className="space-y-1.5">
+              <label className="text-xs font-black uppercase text-gray-400 ml-1">Monto</label>
+              <Input type="number" value={expenseForm.amount} onFocus={e => e.target.select()} onChange={(e) => setExpenseForm({...expenseForm, amount: Number(e.target.value)})} className="h-12 rounded-xl font-bold text-red-600" />
+            </div>
           </div>
-          <DialogFooter><Button onClick={handleAddExpense} className="bg-red-600 text-white">Confirmar Egreso</Button></DialogFooter>
+          <DialogFooter>
+            <Button onClick={handleAddExpense} className="w-full h-12 bg-red-600 hover:bg-red-700 text-white font-black uppercase text-xs tracking-widest rounded-xl">Confirmar Egreso</Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
     </motion.div>
