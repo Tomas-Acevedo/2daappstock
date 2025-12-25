@@ -23,7 +23,7 @@ function App() {
         <OfflineBlocker />
         <GlobalScanListener />
         <Helmet>
-          <title> Sistema de Gestión de Franquicias</title>
+          <title> Gestify</title>
           <meta
             name="description"
             content="Sistema ERP completo para la gestión de franquicias con Torre de Control, gestión de sucursales y control de personal"

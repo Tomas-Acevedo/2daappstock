@@ -62,7 +62,7 @@ export default defineConfig({
             registerType: 'autoUpdate',
             includeAssets: ['favicon.ico', 'apple-touch-icon.png', 'mask-icon.svg'],
             manifest: {
-                name: 'Torre de Control',
+                name: 'Gestify',
                 short_name: 'TorreControl',
                 description: 'Sistema de gestión de inventario y pedidos',
                 theme_color: '#4f46e5',
