@@ -105,7 +105,6 @@ const formatMoneyInText = (text) => {
 
 
 
-  // ✅ Traducción legacy + formateo de números al final
 const translateDescription = (desc) => {
   if (!desc) return desc;
   let translated = desc;
@@ -123,13 +122,17 @@ const translateDescription = (desc) => {
     { regex: /UPDATE Product: (.*)/i, replacement: 'Producto EDITADO: $1' },
     { regex: /INSERT Product: (.*)/i, replacement: 'Producto CREADO: $1' },
 
-    // Primero el nuevo (con Products) 
-{ regex: /New Sale: (.*) via (.*) \| Products: (.*)/i, replacement: 'Nueva Venta: $1 | Metodo de pago: $2 | Productos: $3' },
+    // ✅ CATEGORÍAS
+    { regex: /INSERT Category: (.*)/i, replacement: 'Categoría CREADA: $1' },
+    { regex: /UPDATE Category: (.*)/i, replacement: 'Categoría EDITADA: $1' },
+    { regex: /DELETE Category: (.*)/i, replacement: 'Categoría ELIMINADA: $1' },
 
-// Después el viejo (sin Products)
-{ regex: /New Sale: (.*) via (.*)/i, replacement: 'Nueva Venta: $1| Metodo de pago: $2' },
-{ regex: /New Sale: (.*)/i, replacement: 'Nueva Venta: $1' },
+    // Primero el nuevo (con Products)
+    { regex: /New Sale: (.*) via (.*) \| Products: (.*)/i, replacement: 'Nueva Venta: $1 | Metodo de pago: $2 | Productos: $3' },
 
+    // Después el viejo (sin Products)
+    { regex: /New Sale: (.*) via (.*)/i, replacement: 'Nueva Venta: $1| Metodo de pago: $2' },
+    { regex: /New Sale: (.*)/i, replacement: 'Nueva Venta: $1' },
 
     { regex: /User logged in/i, replacement: 'Sesión iniciada' },
   ];

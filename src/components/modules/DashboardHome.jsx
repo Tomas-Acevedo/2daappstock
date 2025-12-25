@@ -1,10 +1,10 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useParams } from 'react-router-dom';
 import { motion } from 'framer-motion';
-import { 
-  TrendingUp, Users, DollarSign, ShoppingBag, 
+import {
+  TrendingUp, Users, DollarSign, ShoppingBag,
   Calendar as CalendarIcon, Clock, CreditCard,
-  Trash2, ChevronLeft, ChevronRight
+  Trash2
 } from 'lucide-react';
 import { supabase } from '@/lib/customSupabaseClient';
 import { formatCurrency, formatDateTime, getArgentinaDate } from '@/lib/utils';
@@ -54,7 +54,7 @@ const SalesTable = ({ sales, loading, onDelete, paymentMethods }) => {
                   <div className="flex flex-col gap-2">
                     {sale.sale_items?.map((item, idx) => (
                       <span key={idx} className="text-sm text-gray-800 font-bold max-w-[350px] flex items-start gap-2">
-                        <span className="text-indigo-600 font-black min-w-[25px]">{item.quantity}x</span> 
+                        <span className="text-indigo-600 font-black min-w-[25px]">{item.quantity}x</span>
                         <span className="flex-1">{item.product_name}</span>
                         <span className="text-gray-400 font-semibold text-xs whitespace-nowrap">({formatCurrency(item.unit_price)})</span>
                       </span>
@@ -84,7 +84,12 @@ const SalesTable = ({ sales, loading, onDelete, paymentMethods }) => {
                 </td>
                 <td className="px-6 py-6 align-top">
                   <div className="flex items-center justify-center gap-3">
-                    <Button variant="outline" size="icon" className="h-10 w-10 rounded-xl border-gray-200 hover:bg-red-50 hover:text-red-600 transition-all" onClick={() => onDelete(sale)}>
+                    <Button
+                      variant="outline"
+                      size="icon"
+                      className="h-10 w-10 rounded-xl border-gray-200 hover:bg-red-50 hover:text-red-600 transition-all"
+                      onClick={() => onDelete(sale)}
+                    >
                       <Trash2 className="w-5 h-5 text-red-500" />
                     </Button>
                   </div>
@@ -100,7 +105,7 @@ const SalesTable = ({ sales, loading, onDelete, paymentMethods }) => {
 
 const DashboardHome = () => {
   const { branchId } = useParams();
-  
+
   const [metrics, setMetrics] = useState({ periodSales: 0, orderCount: 0, customerCount: 0, averageSale: 0 });
   const [salesData, setSalesData] = useState([]);
   const [dateRange, setDateRange] = useState({ start: getArgentinaDate(), end: getArgentinaDate() });
@@ -109,20 +114,25 @@ const DashboardHome = () => {
   const [availableMethods, setAvailableMethods] = useState([]);
   const [loading, setLoading] = useState(true);
 
-  useEffect(() => {
-    fetchPaymentMethods();
+  const realtimeTimerRef = useRef(null);
+
+  const fetchPaymentMethods = useCallback(async () => {
+    const { data } = await supabase
+      .from('payment_methods')
+      .select('id, name, discount_percentage')
+      .eq('branch_id', branchId)
+      .eq('is_active', true);
+
+    if (data) setAvailableMethods(data);
   }, [branchId]);
 
   useEffect(() => {
-    fetchDashboardData();
-  }, [branchId, dateRange, timeRange, selectedPaymentMethod]);
+    fetchPaymentMethods();
+  }, [fetchPaymentMethods]);
 
-  const fetchPaymentMethods = async () => {
-    const { data } = await supabase.from('payment_methods').select('id, name, discount_percentage').eq('branch_id', branchId).eq('is_active', true);
-    if (data) setAvailableMethods(data);
-  };
+  const fetchDashboardData = useCallback(async () => {
+    if (!branchId) return;
 
-  const fetchDashboardData = async () => {
     setLoading(true);
     try {
       let query = supabase
@@ -130,8 +140,8 @@ const DashboardHome = () => {
         .select(`*, sale_items (product_id, quantity, product_name, unit_price)`)
         .eq('branch_id', branchId)
         .order('created_at', { ascending: false });
-      
-      const startDateTime = `${dateRange.start}T${timeRange.start}:00-03:00`; 
+
+      const startDateTime = `${dateRange.start}T${timeRange.start}:00-03:00`;
       const endDateTime = `${dateRange.end}T${timeRange.end}:59-03:00`;
       query = query.gte('created_at', startDateTime).lte('created_at', endDateTime);
 
@@ -142,15 +152,17 @@ const DashboardHome = () => {
       const { data, error } = await query;
       if (error) throw error;
 
-      setSalesData(data || []);
+      const rows = data || [];
+      setSalesData(rows);
 
-      const salesTotal = data.reduce((acc, sale) => acc + Number(sale.total), 0);
-      const uniqueCustomers = new Set(data.map(s => s.customer_name)).size;
+      const salesTotal = rows.reduce((acc, sale) => acc + Number(sale.total), 0);
+      const uniqueCustomers = new Set(rows.map(s => s.customer_name)).size;
+
       setMetrics({
         periodSales: salesTotal,
-        orderCount: data.length,
+        orderCount: rows.length,
         customerCount: uniqueCustomers,
-        averageSale: data.length > 0 ? salesTotal / data.length : 0
+        averageSale: rows.length > 0 ? salesTotal / rows.length : 0
       });
     } catch (error) {
       console.error("Error fetching dashboard data:", error);
@@ -158,25 +170,71 @@ const DashboardHome = () => {
     } finally {
       setLoading(false);
     }
-  };
+  }, [branchId, dateRange.start, dateRange.end, timeRange.start, timeRange.end, selectedPaymentMethod]);
+
+  useEffect(() => {
+    fetchDashboardData();
+  }, [fetchDashboardData]);
+
+  // =========================
+  // REALTIME: SALES (Dashboard)
+  // =========================
+  useEffect(() => {
+    if (!branchId) return;
+
+    const channel = supabase
+      .channel(`realtime:sales_dashboard:${branchId}`)
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "sales",
+          filter: `branch_id=eq.${branchId}`,
+        },
+        () => {
+          // delay para que la venta + sale_items ya estén persistidos
+          if (realtimeTimerRef.current) clearTimeout(realtimeTimerRef.current);
+          realtimeTimerRef.current = setTimeout(() => {
+            fetchDashboardData();
+          }, 350);
+        }
+      )
+      .subscribe();
+
+    return () => {
+      if (realtimeTimerRef.current) clearTimeout(realtimeTimerRef.current);
+      supabase.removeChannel(channel);
+    };
+  }, [branchId, fetchDashboardData]);
 
   const handleDeleteSale = async (sale) => {
     if (!window.confirm("¿Seguro que deseas eliminar esta venta? El stock será restaurado.")) return;
     try {
       if (sale.sale_items && sale.sale_items.length > 0) {
         for (const item of sale.sale_items) {
-           if (item.product_id) {
-             const { data: currentProd, error: prodError } = await supabase.from('products').select('stock').eq('id', item.product_id).single();
-             if (!prodError && currentProd) {
-               await supabase.from('products').update({ stock: currentProd.stock + item.quantity }).eq('id', item.product_id);
-             }
-           }
+          if (item.product_id) {
+            const { data: currentProd, error: prodError } = await supabase
+              .from('products')
+              .select('stock')
+              .eq('id', item.product_id)
+              .single();
+
+            if (!prodError && currentProd) {
+              await supabase
+                .from('products')
+                .update({ stock: currentProd.stock + item.quantity })
+                .eq('id', item.product_id);
+            }
+          }
         }
       }
+
       const { error } = await supabase.from('sales').delete().eq('id', sale.id);
       if (error) throw error;
+
       toast({ title: "Venta eliminada y stock restaurado" });
-      fetchDashboardData(); 
+      fetchDashboardData(); // realtime igual lo hará, pero esto da feedback inmediato
     } catch (error) {
       toast({ title: "Error al eliminar venta", variant: "destructive" });
     }
@@ -187,24 +245,58 @@ const DashboardHome = () => {
       <div className="bg-white p-4 rounded-xl shadow-sm border border-gray-200">
         <div className="flex flex-col md:flex-row gap-4 items-end">
           <div className="space-y-1 w-full md:w-auto">
-            <label className="text-xs font-bold text-gray-500 uppercase flex items-center gap-1"><CalendarIcon className="w-3 h-3" /> Fechas</label>
+            <label className="text-xs font-bold text-gray-500 uppercase flex items-center gap-1">
+              <CalendarIcon className="w-3 h-3" /> Fechas
+            </label>
             <div className="flex gap-2 items-center">
-              <input type="date" className="border p-2 rounded-md text-sm w-full" value={dateRange.start} onChange={e => setDateRange({...dateRange, start: e.target.value})} />
-              <input type="date" className="border p-2 rounded-md text-sm w-full" value={dateRange.end} onChange={e => setDateRange({...dateRange, end: e.target.value})} />
+              <input
+                type="date"
+                className="border p-2 rounded-md text-sm w-full"
+                value={dateRange.start}
+                onChange={e => setDateRange({ ...dateRange, start: e.target.value })}
+              />
+              <input
+                type="date"
+                className="border p-2 rounded-md text-sm w-full"
+                value={dateRange.end}
+                onChange={e => setDateRange({ ...dateRange, end: e.target.value })}
+              />
             </div>
           </div>
+
           <div className="space-y-1 w-full md:w-auto">
-            <label className="text-xs font-bold text-gray-500 uppercase flex items-center gap-1"><Clock className="w-3 h-3" /> Horario</label>
+            <label className="text-xs font-bold text-gray-500 uppercase flex items-center gap-1">
+              <Clock className="w-3 h-3" /> Horario
+            </label>
             <div className="flex gap-2 items-center">
-              <input type="time" className="border p-2 rounded-md text-sm w-24" value={timeRange.start} onChange={e => setTimeRange({...timeRange, start: e.target.value})} />
-              <input type="time" className="border p-2 rounded-md text-sm w-24" value={timeRange.end} onChange={e => setTimeRange({...timeRange, end: e.target.value})} />
+              <input
+                type="time"
+                className="border p-2 rounded-md text-sm w-24"
+                value={timeRange.start}
+                onChange={e => setTimeRange({ ...timeRange, start: e.target.value })}
+              />
+              <input
+                type="time"
+                className="border p-2 rounded-md text-sm w-24"
+                value={timeRange.end}
+                onChange={e => setTimeRange({ ...timeRange, end: e.target.value })}
+              />
             </div>
           </div>
+
           <div className="space-y-1 w-full md:w-auto flex-1">
-            <label className="text-xs font-bold text-gray-500 uppercase flex items-center gap-1"><CreditCard className="w-3 h-3" /> Método de Pago</label>
-            <select className="w-full border p-2 rounded-md text-sm bg-white" value={selectedPaymentMethod} onChange={e => setSelectedPaymentMethod(e.target.value)}>
+            <label className="text-xs font-bold text-gray-500 uppercase flex items-center gap-1">
+              <CreditCard className="w-3 h-3" /> Método de Pago
+            </label>
+            <select
+              className="w-full border p-2 rounded-md text-sm bg-white"
+              value={selectedPaymentMethod}
+              onChange={e => setSelectedPaymentMethod(e.target.value)}
+            >
               <option value="all">Todos los métodos</option>
-              {availableMethods.map(method => (<option key={method.id} value={method.name}>{method.name}</option>))}
+              {availableMethods.map(method => (
+                <option key={method.id} value={method.name}>{method.name}</option>
+              ))}
             </select>
           </div>
         </div>
@@ -217,7 +309,7 @@ const DashboardHome = () => {
           { title: "Promedio por Venta", value: formatCurrency(metrics.averageSale), desc: "Ticket promedio", icon: TrendingUp, color: "text-blue-600" },
           { title: "Clientes Únicos", value: metrics.customerCount, desc: "En el periodo seleccionado", icon: Users, color: "text-orange-600" }
         ].map((item, i) => (
-          <motion.div key={i} initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.1 * (i+1) }}>
+          <motion.div key={i} initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.1 * (i + 1) }}>
             <Card className="shadow-sm">
               <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
                 <CardTitle className="text-sm font-black uppercase tracking-wider text-gray-500">{item.title}</CardTitle>
@@ -232,10 +324,10 @@ const DashboardHome = () => {
         ))}
       </div>
 
-      <SalesTable 
-        sales={salesData} 
-        loading={loading} 
-        onDelete={handleDeleteSale} 
+      <SalesTable
+        sales={salesData}
+        loading={loading}
+        onDelete={handleDeleteSale}
         paymentMethods={availableMethods}
       />
     </div>
