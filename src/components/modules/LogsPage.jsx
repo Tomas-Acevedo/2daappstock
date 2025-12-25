@@ -11,7 +11,7 @@ const LogsPage = () => {
   const { branchId } = useParams();
   const [logs, setLogs] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [isSendingEmail, setIsSendingEmail] = useState(false);
+  // const [isSendingEmail, setIsSendingEmail] = useState(false);
   const [branchName, setBranchName] = useState('Sucursal');
 
   const translateAction = (action) => {
@@ -111,11 +111,11 @@ const translateDescription = (desc) => {
   let translated = desc;
 
   const patterns = [
-    { regex: /Created new expenses record/i, replacement: 'Nuevo registro de Gasto creado' },
+    { regex: /Created new expenses record/i, replacement: 'Nuevo Gasto creado' },
     { regex: /Created new cash_expenses record/i, replacement: 'Nuevo registro de Egreso de Caja creado' },
-    { regex: /Deleted (.*) record/i, replacement: 'Registro de $1 eliminado' },
-    { regex: /Updated (.*) record/i, replacement: 'Registro de $1 actualizado' },
-    { regex: /Created new (.*) record/i, replacement: 'Nuevo registro de $1 creado' },
+    { regex: /Deleted (.*) record/i, replacement: '$1 eliminado' },
+    { regex: /Updated (.*) record/i, replacement: '$1 actualizado' },
+    { regex: /Created new (.*) record/i, replacement: 'Nuevo $1 creado' },
 
     { regex: /Cash Expense: (.*) \((.*)\)/i, replacement: 'Egreso CAJA: $1 ($2)' },
     { regex: /Expense: (.*) \((.*)\)/i, replacement: 'Nuevo Egreso CAJA: $1 ($2)' },
@@ -189,6 +189,7 @@ const translateDescription = (desc) => {
     setLoading(false);
   };
 
+  /*
   const handleSendTestEmail = async () => {
     setIsSendingEmail(true);
     try {
@@ -217,6 +218,7 @@ const translateDescription = (desc) => {
       setIsSendingEmail(false);
     }
   };
+  */
 
   return (
     <motion.div
@@ -231,7 +233,7 @@ const translateDescription = (desc) => {
         </div>
 
         <div className="flex items-center gap-3">
-          <Button
+          {/* <Button
             variant="outline"
             size="sm"
             onClick={handleSendTestEmail}
@@ -245,6 +247,7 @@ const translateDescription = (desc) => {
             )}
             Probar Email
           </Button>
+          */}
 
           <div className="text-xs font-medium text-indigo-600 bg-indigo-50 px-3 py-1 rounded-full border border-indigo-100">
             Sucursal: {branchName}

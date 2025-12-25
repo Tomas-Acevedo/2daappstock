@@ -54,44 +54,23 @@ const ConfigurationPage = () => {
     }
   };
 
-  // ✅ NUEVA FUNCIÓN: Subir Logo a Supabase Storage
   const handleLogoUpload = async (event) => {
     const file = event.target.files?.[0];
     if (!file) return;
-
-    // Validar que sea imagen
     if (!file.type.startsWith('image/')) {
       toast({ title: "Formato no válido", description: "Por favor sube una imagen.", variant: "destructive" });
       return;
     }
-
     try {
       setUploadingLogo(true);
-      
       const fileExt = file.name.split('.').pop();
       const fileName = `${branchId}-${Math.random()}.${fileExt}`;
       const filePath = `logos/${fileName}`;
-
-      // 1. Subir a Supabase Storage (Bucket 'branch-assets')
-      const { error: uploadError } = await supabase.storage
-        .from('branch-assets')
-        .upload(filePath, file);
-
+      const { error: uploadError } = await supabase.storage.from('branch-assets').upload(filePath, file);
       if (uploadError) throw uploadError;
-
-      // 2. Obtener URL pública
-      const { data: { publicUrl } } = supabase.storage
-        .from('branch-assets')
-        .getPublicUrl(filePath);
-
-      // 3. Actualizar tabla branches
-      const { error: updateError } = await supabase
-        .from('branches')
-        .update({ logo_url: publicUrl })
-        .eq('id', branchId);
-
+      const { data: { publicUrl } } = supabase.storage.from('branch-assets').getPublicUrl(filePath);
+      const { error: updateError } = await supabase.from('branches').update({ logo_url: publicUrl }).eq('id', branchId);
       if (updateError) throw updateError;
-
       setBranchData({ ...branchData, logo_url: publicUrl });
       toast({ title: "Logo actualizado correctamente" });
     } catch (error) {
@@ -129,12 +108,12 @@ const ConfigurationPage = () => {
   };
 
   const handleDeletePaymentMethod = async (id) => {
-    if (!window.confirm("¿Seguro que deseas eliminar este método de pago? Esta acción no se puede deshacer.")) return;
+    if (!window.confirm("¿Seguro que deseas eliminar este método de pago?")) return;
     try {
       const { error } = await supabase.from('payment_methods').delete().eq('id', id);
       if (error) throw error;
       setPaymentMethods(paymentMethods.filter(m => m.id !== id));
-      toast({ title: "Método de pago eliminado" });
+      toast({ title: "Método eliminado" });
     } catch (error) {
       toast({ title: "Error al eliminar", variant: "destructive" });
     }
@@ -160,7 +139,6 @@ const ConfigurationPage = () => {
         <p className="text-gray-500 text-sm">Gestiona la identidad, permisos y métodos de cobro.</p>
       </div>
 
-      {/* ✅ PANEL DE IDENTIDAD (LOGO) */}
       <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
         <div className="p-6 border-b border-gray-100 flex items-center gap-2 bg-indigo-50/30">
           <ImageIcon className="w-5 h-5 text-indigo-600" />
@@ -171,52 +149,28 @@ const ConfigurationPage = () => {
             <div className="relative group">
               <div className="w-32 h-32 rounded-2xl border-2 border-dashed border-gray-200 bg-gray-50 flex items-center justify-center overflow-hidden">
                 {branchData?.logo_url ? (
-                  <img src={branchData.logo_url} alt="Logo sucursal" className="w-full h-full object-contain" />
+                  <img src={branchData.logo_url} alt="Logo" className="w-full h-full object-contain" />
                 ) : (
                   <ImageIcon className="w-10 h-10 text-gray-300" />
                 )}
-                {uploadingLogo && (
-                  <div className="absolute inset-0 bg-white/80 flex items-center justify-center">
-                    <Loader2 className="animate-spin text-indigo-600" />
-                  </div>
-                )}
+                {uploadingLogo && <div className="absolute inset-0 bg-white/80 flex items-center justify-center"><Loader2 className="animate-spin text-indigo-600" /></div>}
               </div>
             </div>
-            
             <div className="space-y-3 flex-1 text-center md:text-left">
               <h3 className="font-bold text-gray-900">Logo de la Sucursal</h3>
-              <p className="text-sm text-gray-500 max-w-md">
-                Este logo se utilizará para identificar la sucursal en el sistema y reportes. Se recomienda una imagen cuadrada de al menos 400x400px en formato PNG o JPG.
-              </p>
+              <p className="text-sm text-gray-500 max-w-md">Se recomienda imagen cuadrada de 400x400px.</p>
               <div className="flex flex-wrap justify-center md:justify-start gap-3">
-                <input 
-                  type="file" 
-                  ref={fileInputRef} 
-                  className="hidden" 
-                  accept="image/*" 
-                  onChange={handleLogoUpload} 
-                />
-                <Button 
-                  onClick={() => fileInputRef.current?.click()} 
-                  disabled={uploadingLogo}
-                  className="bg-indigo-600 hover:bg-indigo-700"
-                >
-                  <Upload className="w-4 h-4 mr-2" />
-                  {branchData?.logo_url ? 'Cambiar Logo' : 'Subir Logo'}
+                <input type="file" ref={fileInputRef} className="hidden" accept="image/*" onChange={handleLogoUpload} />
+                <Button onClick={() => fileInputRef.current?.click()} disabled={uploadingLogo} className="bg-indigo-600 hover:bg-indigo-700">
+                  <Upload className="w-4 h-4 mr-2" /> {branchData?.logo_url ? 'Cambiar Logo' : 'Subir Logo'}
                 </Button>
                 {branchData?.logo_url && (
-                  <Button 
-                    variant="outline" 
-                    className="text-red-500 border-red-100 hover:bg-red-50"
-                    onClick={async () => {
-                      if(confirm("¿Quitar el logo?")) {
-                         await supabase.from('branches').update({ logo_url: null }).eq('id', branchId);
-                         setBranchData({...branchData, logo_url: null});
-                      }
-                    }}
-                  >
-                    <Trash2 className="w-4 h-4 mr-2" /> Quitar
-                  </Button>
+                  <Button variant="outline" className="text-red-500 border-red-100 hover:bg-red-50" onClick={async () => {
+                    if(confirm("¿Quitar logo?")) {
+                       await supabase.from('branches').update({ logo_url: null }).eq('id', branchId);
+                       setBranchData({...branchData, logo_url: null});
+                    }
+                  }}> <Trash2 className="w-4 h-4 mr-2" /> Quitar </Button>
                 )}
               </div>
             </div>
@@ -224,77 +178,63 @@ const ConfigurationPage = () => {
         </div>
       </div>
 
-      {/* PANEL DE PERMISOS */}
       <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
         <div className="p-6 border-b border-gray-100 flex items-center gap-2 bg-indigo-50/30">
           <ShieldCheck className="w-5 h-5 text-indigo-600" />
           <h2 className="font-semibold text-gray-900">Seguridad y Accesos</h2>
         </div>
-        <div className="p-6 space-y-6">
+        <div className="p-6 space-y-4">
+          {/* Permiso Stock */}
           <div className="flex items-center justify-between p-4 bg-gray-50 rounded-lg border border-gray-100">
             <div>
-              <p className="font-bold text-gray-900 text-sm md:text-base">Edición de Stock e Inventario</p>
-              <p className="text-xs md:text-sm text-gray-500">Permite crear y modificar productos en la sucursal.</p>
+              <p className="font-bold text-gray-900 text-sm">Edición de Stock e Inventario</p>
+              <p className="text-xs text-gray-500">Permite crear y modificar productos.</p>
             </div>
             <button onClick={() => togglePermission('allow_stock_edit')}>
-              {branchData?.allow_stock_edit ? <ToggleRight className="w-12 h-12 text-green-600" /> : <ToggleLeft className="w-12 h-12 text-gray-300" />}
+              {branchData?.allow_stock_edit ? <ToggleRight className="w-10 h-10 text-green-600" /> : <ToggleLeft className="w-10 h-10 text-gray-300" />}
             </button>
           </div>
 
+          {/* Permiso Historial */}
           <div className="flex items-center justify-between p-4 bg-gray-50 rounded-lg border border-gray-100">
             <div>
-              <p className="font-bold text-gray-900 text-sm md:text-base">Ver Historial de Cajas Anteriores</p>
-              <p className="text-xs md:text-sm text-gray-500">Si se desactiva, la sucursal solo podrá ver y operar la caja del día de hoy.</p>
+              <p className="font-bold text-gray-900 text-sm">Ver Historial de Cajas Anteriores</p>
+              <p className="text-xs text-gray-500">Permite ver registros de fechas pasadas.</p>
             </div>
             <button onClick={() => togglePermission('allow_cash_history')}>
-              {branchData?.allow_cash_history ? <ToggleRight className="w-12 h-12 text-green-600" /> : <ToggleLeft className="w-12 h-12 text-gray-300" />}
+              {branchData?.allow_cash_history ? <ToggleRight className="w-10 h-10 text-green-600" /> : <ToggleLeft className="w-10 h-10 text-gray-300" />}
+            </button>
+          </div>
+
+          {/* ✅ NUEVO PERMISO: Eliminar Egresos */}
+          <div className="flex items-center justify-between p-4 bg-gray-50 rounded-lg border border-gray-100">
+            <div>
+              <p className="font-bold text-gray-900 text-sm">Eliminar Egresos de Caja</p>
+              <p className="text-xs text-gray-500">Si se desactiva, los empleados no podrán borrar egresos registrados.</p>
+            </div>
+            <button onClick={() => togglePermission('allow_cash_expense_delete')}>
+              {branchData?.allow_cash_expense_delete ? <ToggleRight className="w-10 h-10 text-green-600" /> : <ToggleLeft className="w-10 h-10 text-gray-300" />}
             </button>
           </div>
         </div>
       </div>
 
-      {/* PANEL DE MÉTODOS DE PAGO */}
       <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
         <div className="p-6 border-b border-gray-100 flex justify-between items-center bg-gray-50/50">
-          <div className="flex items-center gap-2">
-            <CreditCard className="w-5 h-5 text-indigo-600" />
-            <h2 className="font-semibold text-gray-900">Métodos de Pago</h2>
-          </div>
-          <Button onClick={() => openMethodDialog()} size="sm" className="bg-indigo-600">
-            <Plus className="w-4 h-4 mr-2" /> Agregar
-          </Button>
+          <div className="flex items-center gap-2"><CreditCard className="w-5 h-5 text-indigo-600" /><h2 className="font-semibold text-gray-900">Métodos de Pago</h2></div>
+          <Button onClick={() => openMethodDialog()} size="sm" className="bg-indigo-600"><Plus className="w-4 h-4 mr-2" /> Agregar</Button>
         </div>
         <div className="overflow-x-auto">
           <table className="w-full text-sm text-left">
-            <thead className="bg-gray-50 text-gray-500 font-medium">
-              <tr>
-                <th className="px-6 py-3">Nombre</th>
-                <th className="px-6 py-3">Descuento</th>
-                <th className="px-6 py-3 text-right">Acciones</th>
-              </tr>
-            </thead>
+            <thead className="bg-gray-50 text-gray-500 font-medium"><tr><th className="px-6 py-3">Nombre</th><th className="px-6 py-3">Descuento</th><th className="px-6 py-3 text-right">Acciones</th></tr></thead>
             <tbody className="divide-y divide-gray-100">
               {paymentMethods.map((m) => (
-                <tr key={m.id} className="hover:bg-gray-50/50 transition-colors">
+                <tr key={m.id} className="hover:bg-gray-50/50">
                   <td className="px-6 py-4 font-medium text-gray-900">{m.name}</td>
                   <td className="px-6 py-4 text-green-600 font-bold">{m.discount_percentage}%</td>
-                  <td className="px-6 py-4 text-right">
-                    <div className="flex justify-end gap-2">
-                      <Button variant="ghost" size="icon" onClick={() => openMethodDialog(m)}>
-                        <Edit className="w-4 h-4 text-gray-400 hover:text-indigo-600" />
-                      </Button>
-                      <Button variant="ghost" size="icon" onClick={() => handleDeletePaymentMethod(m.id)}>
-                        <Trash2 className="w-4 h-4 text-red-400 hover:text-red-600" />
-                      </Button>
-                    </div>
-                  </td>
+                  <td className="px-6 py-4 text-right"><div className="flex justify-end gap-2"><Button variant="ghost" size="icon" onClick={() => openMethodDialog(m)}><Edit className="w-4 h-4 text-gray-400" /></Button><Button variant="ghost" size="icon" onClick={() => handleDeletePaymentMethod(m.id)}><Trash2 className="w-4 h-4 text-red-400" /></Button></div></td>
                 </tr>
               ))}
-              {paymentMethods.length === 0 && (
-                <tr>
-                  <td colSpan="3" className="px-6 py-10 text-center text-gray-400">No hay métodos de pago configurados.</td>
-                </tr>
-              )}
             </tbody>
           </table>
         </div>
@@ -304,30 +244,10 @@ const ConfigurationPage = () => {
         <DialogContent className="bg-white">
           <DialogHeader><DialogTitle>{editingMethod ? 'Editar' : 'Nuevo'} Método de Pago</DialogTitle></DialogHeader>
           <div className="space-y-4 py-4">
-            <div>
-              <label className="text-sm font-medium mb-1.5 block">Nombre</label>
-              <Input 
-                value={formData.name} 
-                onChange={(e) => setFormData({...formData, name: e.target.value})} 
-                placeholder="Ej: Transferencia, Efectivo..."
-              />
-            </div>
-            <div>
-              <label className="text-sm font-medium mb-1.5 block">Descuento (%)</label>
-              <Input 
-                type="number" 
-                value={formData.discount_percentage} 
-                onChange={(e) => setFormData({...formData, discount_percentage: Number(e.target.value)})} 
-                placeholder="0"
-              />
-            </div>
+            <div><label className="text-sm font-medium mb-1 block">Nombre</label><Input value={formData.name} onChange={(e) => setFormData({...formData, name: e.target.value})} placeholder="Transferencia..." /></div>
+            <div><label className="text-sm font-medium mb-1 block">Descuento (%)</label><Input type="number" value={formData.discount_percentage} onChange={(e) => setFormData({...formData, discount_percentage: Number(e.target.value)})} /></div>
           </div>
-          <DialogFooter>
-            <Button variant="ghost" onClick={() => setIsDialogOpen(false)}>Cancelar</Button>
-            <Button onClick={handleSavePaymentMethod} className="bg-indigo-600 text-white">
-              Guardar Cambios
-            </Button>
-          </DialogFooter>
+          <DialogFooter><Button variant="ghost" onClick={() => setIsDialogOpen(false)}>Cancelar</Button><Button onClick={handleSavePaymentMethod} className="bg-indigo-600 text-white">Guardar Cambios</Button></DialogFooter>
         </DialogContent>
       </Dialog>
     </motion.div>

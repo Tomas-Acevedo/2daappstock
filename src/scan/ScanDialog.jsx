@@ -6,7 +6,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { toast } from "@/components/ui/use-toast";
-import { Search, Plus, Minus, Package, Loader2, CheckCircle2, Barcode, ShoppingCart, Trash2, Banknote, AlertTriangle } from 'lucide-react';
+import { Search, Plus, Minus, Package, Loader2, CheckCircle2, Barcode, ShoppingCart, Trash2, Banknote, AlertTriangle, Edit3 } from 'lucide-react';
 import { formatCurrency } from '@/lib/utils';
 import { useAuth } from "@/contexts/AuthContext";
 
@@ -40,6 +40,9 @@ export default function ScanDialog() {
   const [editStock, setEditStock] = useState(0);
   const [saleQty, setSaleQty] = useState(1);
   const [amountReceived, setAmountReceived] = useState(0);
+
+  const [customName, setCustomName] = useState("");
+  const [customPrice, setCustomPrice] = useState("");
 
   const [newName, setNewName] = useState("");
   const [newPrice, setNewPrice] = useState(0);
@@ -85,7 +88,15 @@ export default function ScanDialog() {
     } finally { setLoadingData(false); }
   };
 
-  const handleClose = () => { close(); setSaleQty(1); setAmountReceived(0); setActiveTab("sale"); setViewProduct(null); };
+  const handleClose = () => { 
+    close(); 
+    setSaleQty(1); 
+    setAmountReceived(0); 
+    setActiveTab("sale"); 
+    setViewProduct(null);
+    setCustomName("");
+    setCustomPrice("");
+  };
 
   const subtotal = useMemo(() => cart.reduce((acc, it) => acc + (it.price * it.quantity), 0), [cart]);
   const discountPercent = selectedPaymentMethod ? Number(selectedPaymentMethod.discount_percentage || 0) : 0;
@@ -93,15 +104,34 @@ export default function ScanDialog() {
   const cartTotal = subtotal - discountAmount;
   const changeAmount = useMemo(() => (amountReceived > 0 ? Math.max(0, amountReceived - cartTotal) : 0), [amountReceived, cartTotal]);
 
+  const addCustomToCart = () => {
+    if (!customName.trim() || !customPrice || Number(customPrice) <= 0) {
+      toast({ title: "Faltan datos", description: "Ingresa nombre y precio válido", variant: "destructive" });
+      return;
+    }
+    const customItem = {
+      id: `custom-${Date.now()}`,
+      name: customName,
+      price: Number(customPrice),
+      is_custom: true,
+      stock: 999999 
+    };
+    addToCart(customItem, 1);
+    setCustomName('');
+    setCustomPrice('');
+  };
+
   const handleFinalizeSale = async () => {
     if (cart.length === 0 || !selectedPaymentMethod) return;
     setIsProcessing(true);
     try {
       for (const item of cart) {
-        const { data: currentProd } = await supabase.from('products').select('stock, name').eq('id', item.id).single();
-        if (!currentProd || currentProd.stock < item.quantity) {
-          toast({ title: "Stock insuficiente", description: `Producto: ${currentProd?.name}`, variant: "destructive" });
-          setIsProcessing(false); return;
+        if (!item.is_custom) {
+          const { data: currentProd } = await supabase.from('products').select('stock, name').eq('id', item.id).single();
+          if (!currentProd || currentProd.stock < item.quantity) {
+            toast({ title: "Stock insuficiente", description: `Producto: ${currentProd?.name}`, variant: "destructive" });
+            setIsProcessing(false); return;
+          }
         }
       }
 
@@ -112,14 +142,21 @@ export default function ScanDialog() {
       if (saleError) throw saleError;
 
       const saleItems = cart.map(item => ({
-        sale_id: sale.id, product_id: item.id, product_name: item.name, quantity: item.quantity, unit_price: item.price, is_custom: false
+        sale_id: sale.id, 
+        product_id: item.is_custom ? null : item.id, 
+        product_name: item.name, 
+        quantity: item.quantity, 
+        unit_price: item.price, 
+        is_custom: !!item.is_custom
       }));
 
       await supabase.from('sale_items').insert(saleItems);
 
       for (const item of cart) {
-        const { data: p } = await supabase.from('products').select('stock').eq('id', item.id).single();
-        await supabase.from('products').update({ stock: p.stock - item.quantity }).eq('id', item.id);
+        if (!item.is_custom) {
+          const { data: p } = await supabase.from('products').select('stock').eq('id', item.id).single();
+          await supabase.from('products').update({ stock: p.stock - item.quantity }).eq('id', item.id);
+        }
       }
 
       toast({ title: "¡Venta completada!" });
@@ -160,15 +197,19 @@ export default function ScanDialog() {
         <div className="flex-1 overflow-y-auto p-4 md:p-8 bg-white custom-scrollbar">
           {loading || loadingData ? (
             <div className="h-64 flex flex-col items-center justify-center gap-4"><Loader2 className="w-12 h-12 animate-spin text-indigo-600" /></div>
-          ) : viewProduct ? (
+          ) : viewProduct || activeTab === "cart" ? (
             <div className="space-y-6">
-              <div className="flex justify-center gap-1 md:gap-2 mb-4 bg-gray-100 p-1 rounded-2xl w-fit mx-auto sticky top-0 z-10">
-                <button onClick={() => setActiveTab("sale")} className={`px-4 md:px-6 py-2 rounded-xl text-[10px] md:text-xs font-black transition-all ${activeTab === "sale" ? "bg-white text-indigo-600 shadow-sm" : "text-gray-500"}`}>VENDER</button>
-                <button onClick={() => setActiveTab("edit")} className={`px-4 md:px-6 py-2 rounded-xl text-[10px] md:text-xs font-black transition-all ${activeTab === "edit" ? "bg-white text-indigo-600 shadow-sm" : "text-gray-500"}`}>EDITAR INFO</button>
-                <button onClick={() => setActiveTab("cart")} className={`px-4 md:px-6 py-2 rounded-xl text-[10px] md:text-xs font-black transition-all ${activeTab === "cart" ? "bg-white text-indigo-600 shadow-sm" : "text-gray-500"}`}>CARRITO ({cart.length})</button>
+              
+              {/* BLOQUE DE NAVEGACIÓN CORREGIDO: SE QUEDA EN SU LUGAR Y SUBE CON EL SCROLL */}
+              <div className="flex justify-center pb-4">
+                <div className="flex justify-center gap-1 md:gap-2 bg-gray-100 p-1 rounded-2xl w-fit shadow-sm border border-gray-200/50">
+                  <button onClick={() => setActiveTab("sale")} className={`px-4 md:px-6 py-2 rounded-xl text-[10px] md:text-xs font-black transition-all ${activeTab === "sale" ? "bg-white text-indigo-600 shadow-sm" : "text-gray-500"}`}>VENDER</button>
+                  <button onClick={() => setActiveTab("edit")} className={`px-4 md:px-6 py-2 rounded-xl text-[10px] md:text-xs font-black transition-all ${activeTab === "edit" ? "bg-white text-indigo-600 shadow-sm" : "text-gray-500"}`}>EDITAR INFO</button>
+                  <button onClick={() => setActiveTab("cart")} className={`px-4 md:px-6 py-2 rounded-xl text-[10px] md:text-xs font-black transition-all ${activeTab === "cart" ? "bg-white text-indigo-600 shadow-sm" : "text-gray-500"}`}>CARRITO ({cart.length})</button>
+                </div>
               </div>
 
-              {activeTab === "sale" && (
+              {activeTab === "sale" && viewProduct && (
                 <div className="text-center max-w-xl mx-auto space-y-6 animate-in zoom-in-95 duration-200">
                   <h3 className="text-3xl md:text-4xl font-black text-gray-900 tracking-tight">{viewProduct.name}</h3>
                   <div className="grid grid-cols-2 gap-4">
@@ -181,7 +222,7 @@ export default function ScanDialog() {
                 </div>
               )}
 
-              {activeTab === "edit" && (
+              {activeTab === "edit" && viewProduct && (
                 <div className="max-w-2xl mx-auto grid grid-cols-2 gap-6">
                   <div className="bg-white p-6 rounded-3xl border border-gray-100 shadow-sm space-y-2"><p className="text-[10px] font-black text-gray-400 uppercase">Stock Físico</p><Input type="number" className="text-3xl font-bold h-16 text-center" value={editStock} onFocus={e => e.target.select()} onChange={e => setEditStock(Number(e.target.value))} /></div>
                   <div className="bg-white p-6 rounded-3xl border border-gray-100 shadow-sm space-y-2"><p className="text-[10px] font-black text-indigo-400 uppercase">Precio Venta</p><Input type="number" className="text-3xl font-bold h-16 text-center text-indigo-600" value={editPrice} onFocus={e => e.target.select()} onChange={e => setEditPrice(Number(e.target.value))} /></div>
@@ -191,8 +232,20 @@ export default function ScanDialog() {
 
               {activeTab === "cart" && (
                 <div className="max-w-4xl mx-auto space-y-6 animate-in fade-in duration-300">
+                  <div className="bg-indigo-50/50 p-4 rounded-2xl border border-indigo-100 flex flex-col md:flex-row gap-3 items-end">
+                    <div className="flex-1 w-full space-y-1">
+                      <label className="text-[10px] font-black text-indigo-600 uppercase ml-1">Producto Personalizado</label>
+                      <Input placeholder="Nombre del ítem..." className="bg-white" value={customName} onChange={e => setCustomName(e.target.value)} />
+                    </div>
+                    <div className="w-full md:w-32 space-y-1">
+                      <label className="text-[10px] font-black text-indigo-600 uppercase ml-1">Precio</label>
+                      <Input type="number" placeholder="0.00" className="bg-white" value={customPrice} onChange={e => setCustomPrice(e.target.value)} />
+                    </div>
+                    <Button onClick={addCustomToCart} className="bg-indigo-600 h-10 w-full md:w-auto px-6 font-black rounded-xl"><Plus className="w-4 h-4 mr-2"/> AÑADIR</Button>
+                  </div>
+
                   <div className="border rounded-2xl overflow-hidden shadow-sm bg-white">
-                    <div className="max-h-[300px] overflow-y-auto custom-scrollbar">
+                    <div className="max-h-[350px] overflow-y-auto custom-scrollbar">
                       <table className="w-full text-sm">
                         <thead className="bg-gray-50 font-black text-[10px] uppercase text-gray-400 sticky top-0 z-10">
                           <tr><th className="p-4 text-left">Producto</th><th className="p-4 text-center">Cant.</th><th className="p-4 text-right">Subtotal</th><th className="p-4"></th></tr>
@@ -201,13 +254,21 @@ export default function ScanDialog() {
                           {cart.length === 0 ? (
                             <tr><td colSpan="4" className="p-10 text-center text-gray-400 font-bold">El carrito está vacío</td></tr>
                           ) : cart.map(item => (
-                            <tr key={item.id}>
-                              <td className="p-4 font-bold max-w-[200px] truncate">{item.name}</td>
+                            <tr key={item.id} className={item.is_custom ? "bg-amber-50/30" : ""}>
+                              <td className="p-4 font-bold max-w-[200px] truncate">
+                                <div className="flex items-center gap-2">
+                                  {item.name}
+                                  {item.is_custom && <span className="text-[8px] bg-amber-200 text-amber-700 px-1.5 py-0.5 rounded-full font-black uppercase">Personalizado</span>}
+                                </div>
+                              </td>
                               <td className="p-4">
                                 <div className="flex items-center justify-center gap-2 bg-gray-100 rounded-lg p-1 w-fit mx-auto">
                                   <button onClick={() => updateCartQty(item.id, item.quantity - 1)} className="p-1.5 hover:bg-white rounded transition-all" disabled={item.quantity <= 1}><Minus className="w-3 h-3 text-gray-500"/></button>
                                   <span className="font-black text-sm w-6 text-center">{item.quantity}</span>
-                                  <button onClick={() => { if(item.quantity >= item.stock) { toast({title:"Stock máximo", variant:"destructive"}); return; } updateCartQty(item.id, item.quantity + 1); }} className="p-1.5 hover:bg-white rounded transition-all"><Plus className="w-3 h-3 text-gray-500"/></button>
+                                  <button onClick={() => { 
+                                    if(!item.is_custom && item.quantity >= item.stock) { toast({title:"Stock máximo", variant:"destructive"}); return; } 
+                                    updateCartQty(item.id, item.quantity + 1); 
+                                  }} className="p-1.5 hover:bg-white rounded transition-all"><Plus className="w-3 h-3 text-gray-500"/></button>
                                 </div>
                               </td>
                               <td className="p-4 text-right font-black">{formatCurrency(item.price * item.quantity)}</td>

@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useParams } from 'react-router-dom';
 import { motion } from 'framer-motion';
-import { Wallet, Plus, Minus, Calendar, DollarSign, Trash2, AlertCircle, Loader2, Clock, Package, ShieldCheck, CreditCard } from 'lucide-react';
+import { Wallet, Plus, Calendar, Loader2, Clock, Trash2, Lock } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input'; 
 import { toast } from '@/components/ui/use-toast';
@@ -29,7 +29,8 @@ const CashRegister = () => {
   const [isStartDialogOpen, setIsStartDialogOpen] = useState(false);
   const [isExpenseDialogOpen, setIsExpenseDialogOpen] = useState(false);
   const [openingBalance, setOpeningBalance] = useState(0);
-  const [expenseForm, setExpenseForm] = useState({ amount: 0, description: '' });
+  
+  const [expenseForm, setExpenseForm] = useState({ amount: 0, description: '', isWithdrawal: false });
 
   const formatDateDMY = (dateStr) => {
     const [year, month, day] = dateStr.split("-");
@@ -51,7 +52,8 @@ const CashRegister = () => {
     setLoading(true);
     try {
       const { start, end } = getDayRange(selectedDate);
-      const { data: config } = await supabase.from('branches').select('allow_cash_history').eq('id', branchId).single();
+      // ✅ ACTUALIZADO: Obtenemos el nuevo permiso allow_cash_expense_delete
+      const { data: config } = await supabase.from('branches').select('allow_cash_history, allow_cash_expense_delete').eq('id', branchId).single();
       setBranchConfig(config);
 
       const { data: registers } = await supabase.from('cash_registers').select('*').eq('branch_id', branchId).gte('created_at', start).lte('created_at', end).order('created_at', { ascending: false });
@@ -82,9 +84,6 @@ const CashRegister = () => {
     }
   };
 
-  const isOwner = user?.profile?.role === 'owner';
-  const canViewHistory = isOwner || branchConfig?.allow_cash_history === true;
-
   const handleStartRegister = async () => {
     try {
       const now = new Date();
@@ -97,18 +96,45 @@ const CashRegister = () => {
   };
 
   const handleAddExpense = async () => {
+    if (expenseForm.amount <= 0 || !expenseForm.description) {
+        toast({ title: "Completa los campos", variant: "destructive" });
+        return;
+    }
     try {
       const now = new Date();
       const timeStr = now.toLocaleTimeString('es-AR', { hour12: false });
       const timestamp = `${selectedDate}T${timeStr}-03:00`;
-      await supabase.from('cash_expenses').insert([{ branch_id: branchId, amount: expenseForm.amount, description: expenseForm.description, created_at: timestamp }]);
+      const { error: cashError } = await supabase.from('cash_expenses').insert([{ 
+        branch_id: branchId, 
+        amount: expenseForm.amount, 
+        description: expenseForm.isWithdrawal ? `RETIRO: ${expenseForm.description}` : expenseForm.description, 
+        created_at: timestamp 
+      }]);
+      if (cashError) throw cashError;
+      if (!expenseForm.isWithdrawal) {
+        const { error: expenseError } = await supabase.from('expenses').insert([{
+          branch_id: branchId,
+          name: `[CAJA] ${expenseForm.description}`,
+          amount: Number(expenseForm.amount),
+          currency: 'ARS',
+          payment_method: 'Efectivo',
+          date: timestamp
+        }]);
+        if (expenseError) throw expenseError;
+      }
+      toast({ title: expenseForm.isWithdrawal ? "Retiro registrado" : "Gasto registrado" });
       setIsExpenseDialogOpen(false);
-      setExpenseForm({ amount: 0, description: '' });
+      setExpenseForm({ amount: 0, description: '', isWithdrawal: false });
       fetchRegisterData();
-    } catch (e) { toast({ title: "Error" }); }
+    } catch (e) { toast({ title: "Error", variant: "destructive" }); }
   };
 
   const handleDeleteExpense = async (id) => {
+    // ✅ VALIDACIÓN: Si el usuario no es owner y el permiso está desactivado, no borrar.
+    if (!isOwner && branchConfig?.allow_cash_expense_delete === false) {
+      toast({ title: "Acceso denegado", description: "No tienes permiso para eliminar egresos.", variant: "destructive" });
+      return;
+    }
     if (!window.confirm("¿Seguro que desea eliminar este egreso?")) return;
     await supabase.from('cash_expenses').delete().eq('id', id);
     fetchRegisterData();
@@ -117,6 +143,10 @@ const CashRegister = () => {
   const totalSales = cashSales.reduce((acc, sale) => acc + Number(sale.total), 0);
   const totalExpenses = expenses.reduce((acc, exp) => acc + Number(exp.amount), 0);
   const currentTotal = registerData ? (Number(registerData.opening_balance) + totalSales - totalExpenses) : 0;
+  const isOwner = user?.profile?.role === 'owner';
+  const canViewHistory = isOwner || branchConfig?.allow_cash_history === true;
+  // ✅ Variable para controlar si puede borrar
+  const canDeleteExpense = isOwner || branchConfig?.allow_cash_expense_delete !== false;
 
   return (
     <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="max-w-4xl mx-auto pb-10">
@@ -125,18 +155,14 @@ const CashRegister = () => {
           <div className="bg-indigo-600 p-2 rounded-lg"><Wallet className="w-6 h-6 text-white" /></div>
           <h1 className="text-2xl font-bold text-gray-900">Caja</h1>
         </div>
-        
         {canViewHistory ? (
           <div className="flex items-center gap-2 bg-white border border-gray-200 p-2 rounded-xl shadow-sm">
             <Calendar className="w-4 h-4 text-indigo-600 ml-2" />
-            <input type="date" value={selectedDate} onChange={(e) => setSelectedDate(e.target.value)} className="border-none focus:ring-0 text-sm font-semibold outline-none tabular-nums" />
+            <input type="date" value={selectedDate} onChange={(e) => setSelectedDate(e.target.value)} className="border-none outline-none tabular-nums text-sm font-semibold" />
           </div>
         ) : (
           <div className="flex items-center gap-2 bg-indigo-50 border border-indigo-100 p-2.5 rounded-xl text-indigo-600">
-            <Clock className="w-4 h-4" />
-            <span className="text-sm font-bold uppercase">
-              Jornada Actual ({formatDateDMY(selectedDate)})
-            </span>
+            <Clock className="w-4 h-4" /><span className="text-sm font-bold uppercase">Jornada Actual</span>
           </div>
         )}
       </div>
@@ -144,12 +170,10 @@ const CashRegister = () => {
       {!registerData && !loading ? (
         <div className="bg-white rounded-xl p-12 border border-gray-200 text-center shadow-sm">
           <Calendar className="w-12 h-12 text-gray-300 mx-auto mb-4" />
-          <h2 className="text-xl font-semibold text-gray-900 mb-2">No hay registros para este día</h2>
+          <h2 className="text-xl font-semibold text-gray-900 mb-2">No hay registros</h2>
           {(selectedDate === getArgentinaDate() || isOwner) ? (
-            <Button onClick={() => setIsStartDialogOpen(true)} className="bg-green-600 mt-4">
-              {formatDateDMY(selectedDate)} Abrir Caja
-            </Button>
-          ) : <p className="text-amber-600 font-medium mt-4">Solo puedes operar la caja del día actual.</p>}
+            <Button onClick={() => setIsStartDialogOpen(true)} className="bg-green-600 mt-4">Abrir Caja</Button>
+          ) : <p className="text-amber-600 font-medium mt-4">Solo puedes operar la caja actual.</p>}
         </div>
       ) : (
         <div className="space-y-6">
@@ -170,66 +194,50 @@ const CashRegister = () => {
 
           <Button onClick={() => setIsExpenseDialogOpen(true)} className="bg-red-600"><Plus className="w-4 h-4 mr-2 rotate-45" /> Registrar Egreso</Button>
 
-          {/* Listado de Ventas */}
           <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden tabular-nums">
             <div className="p-4 border-b bg-gray-50/50 flex justify-between items-center">
               <h3 className="font-semibold text-green-600 text-sm uppercase tracking-wider">Ventas en Efectivo</h3>
               <span className="font-bold text-lg">{formatCurrency(totalSales)}</span>
             </div>
             <div className="divide-y divide-gray-100">
-              {cashSales.length === 0 ? <div className="p-8 text-center text-gray-400">Sin ventas registradas</div> : 
-               cashSales.map(sale => (
+              {cashSales.length === 0 ? <div className="p-8 text-center text-gray-400">Sin ventas</div> : cashSales.map(sale => (
                 <div key={sale.id} className="p-5 hover:bg-gray-50 transition-colors">
                   <div className="flex justify-between items-start">
-                    <div className="space-y-1.5 flex-1">
-                      <div>
-                        {/* ✅ NOMBRE Y MÉTODO DE PAGO */}
-                        <div className="flex items-center gap-2 mb-0.5">
-                            <p className="font-bold text-gray-900">{sale.customer_name === 'Cliente General' ? 'Venta Mostrador' : sale.customer_name}</p>
-                            <span className="px-1.5 py-0.5 rounded text-[9px] font-black uppercase bg-indigo-50 text-indigo-600 border border-indigo-100">
-                                {sale.payment_method}
-                            </span>
-                        </div>
-                        <span className="text-[11px] text-gray-400 uppercase font-medium">{formatDateTime(sale.created_at).split(',')[1]} hs</span>
-                      </div>
-                      
-                      {/* PRODUCTOS */}
-                      <div className="flex flex-col gap-1 mt-2 border-l-2 border-indigo-100 pl-3">
-                        {sale.sale_items?.map((item, idx) => (
-                          <div key={idx} className="text-xs text-gray-600 flex items-center gap-1.5 font-medium leading-tight">
-                            <span className="text-indigo-600 font-black">{item.quantity}x</span>
-                            <span>{item.product_name}</span>
-                            <span className="text-gray-400 font-normal">({formatCurrency(item.unit_price)})</span>
-                          </div>
-                        ))}
-                      </div>
+                    <div className="space-y-1 flex-1">
+                      <p className="font-bold text-gray-900">{sale.customer_name === 'Cliente General' ? 'Venta Mostrador' : sale.customer_name}</p>
+                      <span className="text-[11px] text-gray-400 uppercase font-medium">{formatDateTime(sale.created_at).split(',')[1]} hs</span>
                     </div>
-                    <span className="text-xl font-black text-green-600 tracking-tighter">+{formatCurrency(sale.total)}</span>
+                    <span className="text-xl font-black text-green-600">+{formatCurrency(sale.total)}</span>
                   </div>
                 </div>
               ))}
             </div>
           </div>
 
-          {/* Egresos */}
           <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden tabular-nums">
             <div className="p-4 border-b bg-gray-50/50 flex justify-between items-center">
               <h3 className="font-semibold text-red-600 text-sm uppercase tracking-wider">Egresos de Caja</h3>
               <span className="font-bold text-lg">{formatCurrency(totalExpenses)}</span>
             </div>
             <div className="divide-y divide-gray-100">
-              {expenses.length === 0 ? <div className="p-8 text-center text-gray-400">Sin egresos registrados</div> : 
-               expenses.map(expense => (
-                <div key={expense.id} className="p-4 flex justify-between items-center hover:bg-red-50/30 transition-colors">
+              {expenses.length === 0 ? <div className="p-8 text-center text-gray-400">Sin egresos</div> : expenses.map(expense => (
+                <div key={expense.id} className="p-4 flex justify-between items-center hover:bg-red-50/30">
                   <div>
                     <p className="font-bold text-gray-900">{expense.description}</p>
                     <p className="text-[11px] text-gray-400 font-medium uppercase">{formatDateTime(expense.created_at).split(',')[1]} hs</p>
                   </div>
                   <div className="flex items-center gap-4">
                     <span className="text-lg font-black text-red-600">-{formatCurrency(expense.amount)}</span>
-                    <button onClick={() => handleDeleteExpense(expense.id)} className="p-2 text-gray-300 hover:text-red-600 hover:bg-white rounded-lg transition-all shadow-sm border border-transparent hover:border-red-100">
-                      <Trash2 className="w-4 h-4" />
-                    </button>
+                    {/* ✅ LÓGICA DE BORRADO: Mostrar papelera o candado según permiso */}
+                    {canDeleteExpense ? (
+                      <button onClick={() => handleDeleteExpense(expense.id)} className="p-2 text-gray-300 hover:text-red-600 hover:bg-white rounded-lg border border-transparent hover:border-red-100 transition-all">
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    ) : (
+                      <div className="p-2 text-gray-300 cursor-not-allowed bg-gray-50 rounded-lg" title="Borrado desactivado por el administrador">
+                        <Lock className="w-4 h-4" />
+                      </div>
+                    )}
                   </div>
                 </div>
               ))}
@@ -238,7 +246,7 @@ const CashRegister = () => {
         </div>
       )}
 
-      {/* Diálogos */}
+      {/* Diálogos Start y Expense omitidos por brevedad pero deben mantenerse igual */}
       <Dialog open={isStartDialogOpen} onOpenChange={setIsStartDialogOpen}>
         <DialogContent className="bg-white rounded-2xl">
           <DialogHeader><DialogTitle className="text-xl font-bold">Abrir Caja</DialogTitle></DialogHeader>
@@ -246,9 +254,7 @@ const CashRegister = () => {
             <label className="text-xs font-black uppercase text-gray-400">Monto Inicial</label>
             <Input type="number" value={openingBalance} onFocus={e => e.target.select()} onChange={(e) => setOpeningBalance(Number(e.target.value))} className="h-12 rounded-xl text-lg font-bold" />
           </div>
-          <DialogFooter>
-            <Button onClick={handleStartRegister} className="w-full h-12 bg-green-600 hover:bg-green-700 text-white font-black uppercase text-xs tracking-widest rounded-xl">Iniciar Jornada</Button>
-          </DialogFooter>
+          <DialogFooter><Button onClick={handleStartRegister} className="w-full h-12 bg-green-600 text-white font-black uppercase text-xs rounded-xl">Iniciar Jornada</Button></DialogFooter>
         </DialogContent>
       </Dialog>
 
@@ -256,18 +262,14 @@ const CashRegister = () => {
         <DialogContent className="bg-white rounded-2xl">
           <DialogHeader><DialogTitle className="text-xl font-bold">Nuevo Egreso</DialogTitle></DialogHeader>
           <div className="py-4 space-y-4">
-            <div className="space-y-1.5">
-              <label className="text-xs font-black uppercase text-gray-400 ml-1">Descripción</label>
-              <Input value={expenseForm.description} onChange={(e) => setExpenseForm({...expenseForm, description: e.target.value})} placeholder="Ej: Pago a proveedor, flete..." className="h-12 rounded-xl" />
+            <div className="flex bg-gray-100 p-1 rounded-xl">
+                <button onClick={() => setExpenseForm({...expenseForm, isWithdrawal: false})} className={`flex-1 py-2 text-xs font-bold rounded-lg ${!expenseForm.isWithdrawal ? 'bg-white text-indigo-600' : 'text-gray-500'}`}>GASTO</button>
+                <button onClick={() => setExpenseForm({...expenseForm, isWithdrawal: true})} className={`flex-1 py-2 text-xs font-bold rounded-lg ${expenseForm.isWithdrawal ? 'bg-white text-amber-600' : 'text-gray-500'}`}>RETIRO</button>
             </div>
-            <div className="space-y-1.5">
-              <label className="text-xs font-black uppercase text-gray-400 ml-1">Monto</label>
-              <Input type="number" value={expenseForm.amount} onFocus={e => e.target.select()} onChange={(e) => setExpenseForm({...expenseForm, amount: Number(e.target.value)})} className="h-12 rounded-xl font-bold text-red-600" />
-            </div>
+            <div className="space-y-1.5"><label className="text-xs font-black uppercase text-gray-400">Descripción</label><Input value={expenseForm.description} onChange={(e) => setExpenseForm({...expenseForm, description: e.target.value})} className="h-12 rounded-xl" /></div>
+            <div className="space-y-1.5"><label className="text-xs font-black uppercase text-gray-400">Monto</label><Input type="number" value={expenseForm.amount} onFocus={e => e.target.select()} onChange={(e) => setExpenseForm({...expenseForm, amount: Number(e.target.value)})} className="h-12 rounded-xl font-bold text-red-600" /></div>
           </div>
-          <DialogFooter>
-            <Button onClick={handleAddExpense} className="w-full h-12 bg-red-600 hover:bg-red-700 text-white font-black uppercase text-xs tracking-widest rounded-xl">Confirmar Egreso</Button>
-          </DialogFooter>
+          <DialogFooter><Button onClick={handleAddExpense} className={`w-full h-12 text-white font-black uppercase text-xs rounded-xl ${expenseForm.isWithdrawal ? 'bg-amber-600' : 'bg-red-600'}`}>Confirmar</Button></DialogFooter>
         </DialogContent>
       </Dialog>
     </motion.div>
