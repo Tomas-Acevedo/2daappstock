@@ -90,6 +90,33 @@ const OrdersPage = () => {
 
   useEffect(() => { if (branchId) { fetchOrders(); fetchSummary(); } }, [fetchOrders, fetchSummary]);
 
+  // ✅ Realtime: refrescar pedidos en vivo cuando cambia algo en esta sucursal
+useEffect(() => {
+  if (!branchId) return;
+
+  const channel = supabase
+    .channel(`realtime:orders:${branchId}`)
+    .on(
+      "postgres_changes",
+      {
+        event: "*",
+        schema: "public",
+        table: "orders",
+        filter: `branch_id=eq.${branchId}`,
+      },
+      () => {
+        fetchOrders();
+        fetchSummary();
+      }
+    )
+    .subscribe();
+
+  return () => {
+    supabase.removeChannel(channel);
+  };
+}, [branchId, fetchOrders, fetchSummary]);
+
+
   useEffect(() => {
     const getProds = async () => {
       const { data } = await supabase.from('products').select('*').eq('branch_id', branchId);
@@ -384,7 +411,27 @@ const OrdersPage = () => {
                         <Button size="sm" variant="ghost" className="rounded-xl hover:bg-green-50 font-bold" onClick={() => generatePDF(order)}><FileText className="w-4 h-4 mr-2" /> PDF</Button>
                         <Button size="sm" variant="ghost" className="rounded-xl hover:bg-indigo-50 font-bold" onClick={() => handleShowDetails(order)}><Eye className="w-4 h-4 mr-2" /> Detalle</Button>
                         <Button size="sm" variant="ghost" className="rounded-xl hover:bg-yellow-50 font-bold" onClick={() => handleEditOrder(order)}><Edit className="w-4 h-4 mr-2" /> Editar</Button>
-                        <Button size="sm" variant="ghost" className="rounded-xl hover:bg-red-50 text-red-600 font-bold" onClick={() => { if(confirm("¿Eliminar?")) supabase.from('orders').delete().eq('id', order.id).then(() => fetchOrders()); }}><Trash2 className="w-4 h-4" /></Button>
+                        <Button 
+  size="sm" 
+  variant="ghost" 
+  className="rounded-xl hover:bg-red-50 text-red-600 font-bold" 
+  onClick={async () => { 
+    if(confirm("¿Estás seguro de eliminar este pedido?")) {
+      const { error } = await supabase.from('orders').delete().eq('id', order.id);
+      if (error) {
+        toast({ title: "Error al eliminar", variant: "destructive" });
+      } else {
+        // No es estrictamente necesario llamar a fetchOrders() aquí 
+        // si el Realtime funciona, pero ayuda a la velocidad percibida.
+        toast({ title: "Pedido eliminado correctamente" });
+        fetchOrders(); 
+        fetchSummary();
+      }
+    } 
+  }}
+>
+  <Trash2 className="w-4 h-4" />
+</Button>
                       </div>
                     </div>
                   </div>
