@@ -19,7 +19,7 @@ const Sidebar = ({ onClose }) => {
     { icon: LayoutDashboard, label: 'Estadísticas', path: '' },
     { icon: ShoppingCart, label: 'Ventas', path: 'sales' },
     { icon: ClipboardList, label: 'Pedidos', path: 'orders' },
-    { icon: Package, label: 'Inventario', path: 'inventory' },
+    { icon: Package, label: 'Productos', path: 'inventory' },
     { icon: Wallet, label: 'Caja', path: 'caja' },
     { icon: Banknote, label: 'Gastos', path: 'expenses' },
     { icon: FileText, label: 'Logs', path: 'logs' },
