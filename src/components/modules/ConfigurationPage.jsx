@@ -184,7 +184,6 @@ const ConfigurationPage = () => {
           <h2 className="font-semibold text-gray-900">Seguridad y Accesos</h2>
         </div>
         <div className="p-6 space-y-4">
-          {/* Permiso Stock */}
           <div className="flex items-center justify-between p-4 bg-gray-50 rounded-lg border border-gray-100">
             <div>
               <p className="font-bold text-gray-900 text-sm">Edición de Stock e Inventario</p>
@@ -195,7 +194,6 @@ const ConfigurationPage = () => {
             </button>
           </div>
 
-          {/* Permiso Historial */}
           <div className="flex items-center justify-between p-4 bg-gray-50 rounded-lg border border-gray-100">
             <div>
               <p className="font-bold text-gray-900 text-sm">Ver Historial de Cajas Anteriores</p>
@@ -206,7 +204,6 @@ const ConfigurationPage = () => {
             </button>
           </div>
 
-          {/* ✅ NUEVO PERMISO: Eliminar Egresos */}
           <div className="flex items-center justify-between p-4 bg-gray-50 rounded-lg border border-gray-100">
             <div>
               <p className="font-bold text-gray-900 text-sm">Eliminar Egresos de Caja</p>
@@ -214,6 +211,17 @@ const ConfigurationPage = () => {
             </div>
             <button onClick={() => togglePermission('allow_cash_expense_delete')}>
               {branchData?.allow_cash_expense_delete ? <ToggleRight className="w-10 h-10 text-green-600" /> : <ToggleLeft className="w-10 h-10 text-gray-300" />}
+            </button>
+          </div>
+
+          {/* ✅ NUEVO PERMISO: EDITAR/ELIMINAR VENTAS */}
+          <div className="flex items-center justify-between p-4 bg-gray-50 rounded-lg border border-gray-100">
+            <div>
+              <p className="font-bold text-gray-900 text-sm">Editar y Eliminar Ventas en Historial</p>
+              <p className="text-xs text-gray-500">Si se desactiva, el personal de sucursal no podrá modificar ventas pasadas.</p>
+            </div>
+            <button onClick={() => togglePermission('allow_sales_edit_delete')}>
+              {branchData?.allow_sales_edit_delete ? <ToggleRight className="w-10 h-10 text-green-600" /> : <ToggleLeft className="w-10 h-10 text-gray-300" />}
             </button>
           </div>
         </div>

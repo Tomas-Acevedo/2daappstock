@@ -31,6 +31,7 @@ const SalesHistoryPage = () => {
   const [branchName, setBranchName] = useState('Sucursal');
   const [userRole, setUserRole] = useState(null);
   const [paymentMethods, setPaymentMethods] = useState([]);
+  const [allowEditDelete, setAllowEditDelete] = useState(true); // Estado para el permiso
 
   const [summaryData, setSummaryData] = useState({ total: 0, byMethod: {} });
 
@@ -49,8 +50,9 @@ const SalesHistoryPage = () => {
   const [editForm, setEditForm] = useState({ customer_name: '', payment_method: '' });
 
   const isOwner = userRole === 'owner';
+  // Lógica de visibilidad de acciones: Dueño siempre ve, sucursal depende del permiso
+  const canModifySales = isOwner || allowEditDelete;
 
-  // Para hacer "debounce" de refetch cuando llegan varios eventos seguidos
   const realtimeTimerRef = useRef(null);
 
   useEffect(() => {
@@ -62,7 +64,6 @@ const SalesHistoryPage = () => {
       setRoleLoading(false);
     };
     initializePage();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [branchId]);
 
   const fetchUserRole = async () => {
@@ -82,8 +83,17 @@ const SalesHistoryPage = () => {
   };
 
   const fetchBranchDetails = async () => {
-    const { data } = await supabase.from('branches').select('name').eq('id', branchId).single();
-    if (data) setBranchName(data.name);
+    // Traemos el nombre y el permiso de edición/eliminación
+    const { data } = await supabase
+      .from('branches')
+      .select('name, allow_sales_edit_delete')
+      .eq('id', branchId)
+      .single();
+    
+    if (data) {
+      setBranchName(data.name);
+      setAllowEditDelete(data.allow_sales_edit_delete ?? true);
+    }
   };
 
   const fetchPaymentMethods = async () => {
@@ -99,8 +109,7 @@ const SalesHistoryPage = () => {
   };
 
   const fetchSales = useCallback(async () => {
-    if (!branchId) return;
-    if (roleLoading || !userRole) return;
+    if (!branchId || roleLoading || !userRole) return;
 
     setLoading(true);
     try {
@@ -148,12 +157,10 @@ const SalesHistoryPage = () => {
       setHasMore((salesRes.data || []).length === pageSize);
 
       const calculatedTotals = (totalsRes.data || []).reduce((acc, sale) => {
-        const method = sale.payment_method || 'Sin especificar';
         const amount = Number(sale.total);
         acc.total += amount;
-        acc.byMethod[method] = (acc.byMethod[method] || 0) + amount;
         return acc;
-      }, { total: 0, byMethod: {} });
+      }, { total: 0 });
 
       setSummaryData(calculatedTotals);
     } catch (error) {
@@ -168,12 +175,8 @@ const SalesHistoryPage = () => {
     fetchSales();
   }, [fetchSales]);
 
-  // =========================
-  // REALTIME: SALES (Historial)
-  // =========================
   useEffect(() => {
-    if (!branchId) return;
-    if (roleLoading || !userRole) return;
+    if (!branchId || roleLoading || !userRole) return;
 
     const channel = supabase
       .channel(`realtime:sales_history:${branchId}`)
@@ -186,7 +189,6 @@ const SalesHistoryPage = () => {
           filter: `branch_id=eq.${branchId}`,
         },
         () => {
-          // mini debounce + delay para asegurar que sale_items ya estén listos
           if (realtimeTimerRef.current) clearTimeout(realtimeTimerRef.current);
           realtimeTimerRef.current = setTimeout(() => {
             fetchSales();
@@ -226,8 +228,6 @@ const SalesHistoryPage = () => {
       if (error) throw error;
 
       toast({ title: "Venta eliminada correctamente" });
-      // No hace falta llamar fetchSales sí o sí: realtime lo hará,
-      // pero lo dejamos por feedback inmediato
       fetchSales();
     } catch (error) {
       toast({ title: "Error al eliminar", variant: "destructive" });
@@ -274,13 +274,15 @@ const SalesHistoryPage = () => {
           <p className="text-sm text-gray-500 font-medium">Sucursal: {branchName}</p>
         </div>
 
-        <div className="bg-white border border-gray-200 rounded-xl px-4 py-3 shadow-sm flex items-center gap-3">
-          <Wallet className="w-5 h-5 text-indigo-600" />
-          <div>
-            <div className="text-xs text-gray-500 font-bold uppercase tracking-wider">Total</div>
-            <div className="text-lg font-black text-gray-900">{formatCurrency(summaryData.total)}</div>
+        {isOwner && (
+          <div className="bg-white border border-gray-200 rounded-xl px-4 py-3 shadow-sm flex items-center gap-3">
+            <Wallet className="w-5 h-5 text-indigo-600" />
+            <div>
+              <div className="text-xs text-gray-500 font-bold uppercase tracking-wider">Total</div>
+              <div className="text-lg font-black text-gray-900">{formatCurrency(summaryData.total)}</div>
+            </div>
           </div>
-        </div>
+        )}
       </div>
 
       {isOwner && (
@@ -335,20 +337,22 @@ const SalesHistoryPage = () => {
                 <th className="px-6 py-5 text-xs font-black uppercase tracking-widest">Detalle</th>
                 <th className="px-6 py-5 text-xs font-black uppercase tracking-widest">Método</th>
                 <th className="px-6 py-5 text-right text-xs font-black uppercase tracking-widest">Total</th>
-                <th className="px-6 py-5 text-center text-xs font-black uppercase tracking-widest">Acciones</th>
+                {canModifySales && (
+                    <th className="px-6 py-5 text-center text-xs font-black uppercase tracking-widest">Acciones</th>
+                )}
               </tr>
             </thead>
 
             <tbody className="divide-y divide-gray-200">
               {loading ? (
                 <tr>
-                  <td colSpan="6" className="text-center p-10 text-lg text-gray-400 font-medium">
+                  <td colSpan={canModifySales ? "6" : "5"} className="text-center p-10 text-lg text-gray-400 font-medium">
                     Cargando ventas...
                   </td>
                 </tr>
               ) : sales.length === 0 ? (
                 <tr>
-                  <td colSpan="6" className="text-center p-12 text-gray-500 text-lg">
+                  <td colSpan={canModifySales ? "6" : "5"} className="text-center p-12 text-gray-500 text-lg">
                     No se encontraron ventas.
                   </td>
                 </tr>
@@ -381,32 +385,33 @@ const SalesHistoryPage = () => {
                     <td className="px-6 py-6 text-right text-xl font-black text-gray-900 tracking-tighter align-top">
                       {formatCurrency(sale.total)}
                     </td>
-                    <td className="px-6 py-6 align-top">
-                      <div className="flex items-center justify-center gap-3">
-                        <Button
-                          variant="outline"
-                          size="icon"
-                          className="h-10 w-10 rounded-xl border-gray-200 hover:bg-indigo-50 hover:text-indigo-600 transition-all"
-                          onClick={() => openEdit(sale)}
-                        >
-                          <Edit className="w-5 h-5 text-indigo-600" />
-                        </Button>
+                    {canModifySales && (
+                        <td className="px-6 py-6 align-top">
+                        <div className="flex items-center justify-center gap-3">
+                            <Button
+                            variant="outline"
+                            size="icon"
+                            className="h-10 w-10 rounded-xl border-gray-200 hover:bg-indigo-50 hover:text-indigo-600 transition-all"
+                            onClick={() => openEdit(sale)}
+                            >
+                            <Edit className="w-5 h-5 text-indigo-600" />
+                            </Button>
 
-                        <Button
-                          variant="outline"
-                          size="icon"
-                          className="h-10 w-10 rounded-xl border-gray-200 hover:bg-red-50 hover:text-red-600 transition-all"
-                          onClick={() => handleDelete(sale)}
-                        >
-                          <Trash2 className="w-5 h-5 text-red-500" />
-                        </Button>
-                      </div>
-                    </td>
+                            <Button
+                            variant="outline"
+                            size="icon"
+                            className="h-10 w-10 rounded-xl border-gray-200 hover:bg-red-50 hover:text-red-600 transition-all"
+                            onClick={() => handleDelete(sale)}
+                            >
+                            <Trash2 className="w-5 h-5 text-red-500" />
+                            </Button>
+                        </div>
+                        </td>
+                    )}
                   </tr>
                 ))
               )}
             </tbody>
-
           </table>
         </div>
       </div>

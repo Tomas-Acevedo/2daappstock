@@ -29,7 +29,7 @@ const Sidebar = ({ onClose }) => {
   const branchMenuItems = [
     { icon: ShoppingCart, label: 'Ventas', path: 'sales' },
     { icon: ClipboardList, label: 'Pedidos', path: 'orders' },
-    { icon: Package, label: 'Inventario', path: 'inventory' },
+    { icon: Package, label: 'Productos', path: 'inventory' },
     { icon: Wallet, label: 'Caja', path: 'caja' },
   ];
 

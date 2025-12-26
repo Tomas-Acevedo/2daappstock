@@ -4,7 +4,7 @@ import { motion } from 'framer-motion';
 import {
   TrendingUp, Users, DollarSign, ShoppingBag,
   Calendar as CalendarIcon, Clock, CreditCard,
-  Trash2
+  Trash2, ChevronLeft, ChevronRight
 } from 'lucide-react';
 import { supabase } from '@/lib/customSupabaseClient';
 import { formatCurrency, formatDateTime, getArgentinaDate } from '@/lib/utils';
@@ -12,13 +12,12 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from '@/components/ui/button';
 import { toast } from '@/components/ui/use-toast';
 
-// ✅ TABLA ACTUALIZADA: Sin botón de impresión
-const SalesTable = ({ sales, loading, onDelete, paymentMethods }) => {
-  if (loading) {
+const SalesTable = ({ sales, loading, onDelete, paymentMethods, page, setPage, hasMore }) => {
+  if (loading && sales.length === 0) {
     return <div className="text-center p-10 text-lg text-gray-400 font-medium">Cargando ventas...</div>;
   }
 
-  if (sales.length === 0) {
+  if (!loading && sales.length === 0) {
     return (
       <div className="text-center p-12 bg-gray-50 rounded-xl border border-dashed border-gray-300 text-gray-500 text-lg">
         No se encontraron ventas para los filtros seleccionados.
@@ -27,77 +26,104 @@ const SalesTable = ({ sales, loading, onDelete, paymentMethods }) => {
   }
 
   return (
-    <div className="bg-white rounded-2xl shadow-md border border-gray-200 overflow-hidden">
-      <div className="overflow-x-auto">
-        <table className="w-full text-left border-collapse">
-          <thead className="bg-gray-100 border-b-2 border-gray-200 text-gray-700">
-            <tr>
-              <th className="px-6 py-5 text-xs font-black uppercase tracking-widest">Fecha / Hora</th>
-              <th className="px-6 py-5 text-xs font-black uppercase tracking-widest">Cliente</th>
-              <th className="px-6 py-5 text-xs font-black uppercase tracking-widest">Detalle Compra</th>
-              <th className="px-6 py-5 text-xs font-black uppercase tracking-widest">Método</th>
-              <th className="px-6 py-5 text-right text-xs font-black uppercase tracking-widest">Total</th>
-              <th className="px-6 py-5 text-center text-xs font-black uppercase tracking-widest">Acciones</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-gray-200">
-            {sales.map((sale) => (
-              <tr key={sale.id} className="hover:bg-indigo-50/40 transition-colors">
-                <td className="px-6 py-6 whitespace-nowrap align-top">
-                  <div className="text-base font-bold text-gray-900">{formatDateTime(sale.created_at).split(',')[0]}</div>
-                  <div className="text-sm text-gray-500 font-medium">{formatDateTime(sale.created_at).split(',')[1]}</div>
-                </td>
-                <td className="px-6 py-6 text-base font-bold text-gray-900 align-top">
-                  {sale.customer_name || "Cliente General"}
-                </td>
-                <td className="px-6 py-6 align-top">
-                  <div className="flex flex-col gap-2">
-                    {sale.sale_items?.map((item, idx) => (
-                      <span key={idx} className="text-sm text-gray-800 font-bold max-w-[350px] flex items-start gap-2">
-                        <span className="text-indigo-600 font-black min-w-[25px]">{item.quantity}x</span>
-                        <span className="flex-1">{item.product_name}</span>
-                        <span className="text-gray-400 font-semibold text-xs whitespace-nowrap">({formatCurrency(item.unit_price)})</span>
-                      </span>
-                    ))}
-                  </div>
-                </td>
-                <td className="px-6 py-6 align-top">
-                  <div className="flex items-center gap-2">
-                    <span className="px-3 py-1.5 rounded-lg text-[11px] font-black uppercase tracking-wider bg-indigo-50 text-indigo-700 border border-indigo-100 shadow-sm">
-                      {sale.payment_method}
-                    </span>
-                    {(() => {
-                      const method = paymentMethods.find(m => m.name === sale.payment_method);
-                      if (method && Number(method.discount_percentage) > 0) {
-                        return (
-                          <span className="text-[10px] bg-green-500 text-white px-2 py-0.5 rounded-full font-black">
-                            -{method.discount_percentage}%
-                          </span>
-                        );
-                      }
-                      return null;
-                    })()}
-                  </div>
-                </td>
-                <td className="px-6 py-6 text-right text-xl font-black text-gray-900 tracking-tighter align-top">
-                  {formatCurrency(sale.total)}
-                </td>
-                <td className="px-6 py-6 align-top">
-                  <div className="flex items-center justify-center gap-3">
-                    <Button
-                      variant="outline"
-                      size="icon"
-                      className="h-10 w-10 rounded-xl border-gray-200 hover:bg-red-50 hover:text-red-600 transition-all"
-                      onClick={() => onDelete(sale)}
-                    >
-                      <Trash2 className="w-5 h-5 text-red-500" />
-                    </Button>
-                  </div>
-                </td>
+    <div className="space-y-4">
+      <div className="bg-white rounded-2xl shadow-md border border-gray-200 overflow-hidden">
+        <div className="overflow-x-auto">
+          <table className="w-full text-left border-collapse">
+            <thead className="bg-gray-100 border-b-2 border-gray-200 text-gray-700">
+              <tr>
+                <th className="px-6 py-5 text-xs font-black uppercase tracking-widest">Fecha / Hora</th>
+                <th className="px-6 py-5 text-xs font-black uppercase tracking-widest">Cliente</th>
+                <th className="px-6 py-5 text-xs font-black uppercase tracking-widest">Detalle Compra</th>
+                <th className="px-6 py-5 text-xs font-black uppercase tracking-widest">Método</th>
+                <th className="px-6 py-5 text-right text-xs font-black uppercase tracking-widest">Total</th>
+                <th className="px-6 py-5 text-center text-xs font-black uppercase tracking-widest">Acciones</th>
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody className="divide-y divide-gray-200">
+              {sales.map((sale) => (
+                <tr key={sale.id} className="hover:bg-indigo-50/40 transition-colors">
+                  <td className="px-6 py-6 whitespace-nowrap align-top">
+                    <div className="text-base font-bold text-gray-900">{formatDateTime(sale.created_at).split(',')[0]}</div>
+                    <div className="text-sm text-gray-500 font-medium">{formatDateTime(sale.created_at).split(',')[1]}</div>
+                  </td>
+                  <td className="px-6 py-6 text-base font-bold text-gray-900 align-top">
+                    {sale.customer_name || "Cliente General"}
+                  </td>
+                  <td className="px-6 py-6 align-top">
+                    <div className="flex flex-col gap-2">
+                      {sale.sale_items?.map((item, idx) => (
+                        <span key={idx} className="text-sm text-gray-800 font-bold max-w-[350px] flex items-start gap-2">
+                          <span className="text-indigo-600 font-black min-w-[25px]">{item.quantity}x</span>
+                          <span className="flex-1">{item.product_name}</span>
+                          <span className="text-gray-400 font-semibold text-xs whitespace-nowrap">({formatCurrency(item.unit_price)})</span>
+                        </span>
+                      ))}
+                    </div>
+                  </td>
+                  <td className="px-6 py-6 align-top">
+                    <div className="flex items-center gap-2">
+                      <span className="px-3 py-1.5 rounded-lg text-[11px] font-black uppercase tracking-wider bg-indigo-50 text-indigo-700 border border-indigo-100 shadow-sm">
+                        {sale.payment_method}
+                      </span>
+                      {(() => {
+                        const method = paymentMethods.find(m => m.name === sale.payment_method);
+                        if (method && Number(method.discount_percentage) > 0) {
+                          return (
+                            <span className="text-[10px] bg-green-500 text-white px-2 py-0.5 rounded-full font-black">
+                              -{method.discount_percentage}%
+                            </span>
+                          );
+                        }
+                        return null;
+                      })()}
+                    </div>
+                  </td>
+                  <td className="px-6 py-6 text-right text-xl font-black text-gray-900 tracking-tighter align-top">
+                    {formatCurrency(sale.total)}
+                  </td>
+                  <td className="px-6 py-6 align-top">
+                    <div className="flex items-center justify-center gap-3">
+                      <Button
+                        variant="outline"
+                        size="icon"
+                        className="h-10 w-10 rounded-xl border-gray-200 hover:bg-red-50 hover:text-red-600 transition-all"
+                        onClick={() => onDelete(sale)}
+                      >
+                        <Trash2 className="w-5 h-5 text-red-500" />
+                      </Button>
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      {/* Controles de Paginación */}
+      <div className="flex items-center justify-between px-2">
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={() => setPage(p => Math.max(0, p - 1))}
+          disabled={page === 0 || loading}
+          className="rounded-xl font-bold"
+        >
+          <ChevronLeft className="w-4 h-4 mr-2" /> Anterior
+        </Button>
+        <span className="text-sm font-bold text-gray-500">
+          Página {page + 1}
+        </span>
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={() => setPage(p => p + 1)}
+          disabled={!hasMore || loading}
+          className="rounded-xl font-bold"
+        >
+          Siguiente <ChevronRight className="w-4 h-4 ml-2" />
+        </Button>
       </div>
     </div>
   );
@@ -113,6 +139,11 @@ const DashboardHome = () => {
   const [selectedPaymentMethod, setSelectedPaymentMethod] = useState('all');
   const [availableMethods, setAvailableMethods] = useState([]);
   const [loading, setLoading] = useState(true);
+
+  // Estados de paginación
+  const [page, setPage] = useState(0);
+  const [hasMore, setHasMore] = useState(true);
+  const pageSize = 20;
 
   const realtimeTimerRef = useRef(null);
 
@@ -135,34 +166,52 @@ const DashboardHome = () => {
 
     setLoading(true);
     try {
-      let query = supabase
+      const startDateTime = `${dateRange.start}T${timeRange.start}:00-03:00`;
+      const endDateTime = `${dateRange.end}T${timeRange.end}:59-03:00`;
+
+      // 1. Consulta para la tabla (paginada)
+      let salesQuery = supabase
         .from('sales')
         .select(`*, sale_items (product_id, quantity, product_name, unit_price)`)
         .eq('branch_id', branchId)
-        .order('created_at', { ascending: false });
+        .gte('created_at', startDateTime)
+        .lte('created_at', endDateTime)
+        .order('created_at', { ascending: false })
+        .range(page * pageSize, (page + 1) * pageSize - 1);
 
-      const startDateTime = `${dateRange.start}T${timeRange.start}:00-03:00`;
-      const endDateTime = `${dateRange.end}T${timeRange.end}:59-03:00`;
-      query = query.gte('created_at', startDateTime).lte('created_at', endDateTime);
+      // 2. Consulta para métricas (toda la data del periodo)
+      let metricsQuery = supabase
+        .from('sales')
+        .select('total, customer_name')
+        .eq('branch_id', branchId)
+        .gte('created_at', startDateTime)
+        .lte('created_at', endDateTime);
 
       if (selectedPaymentMethod !== 'all') {
-        query = query.eq('payment_method', selectedPaymentMethod);
+        salesQuery = salesQuery.eq('payment_method', selectedPaymentMethod);
+        metricsQuery = metricsQuery.eq('payment_method', selectedPaymentMethod);
       }
 
-      const { data, error } = await query;
-      if (error) throw error;
+      const [salesRes, metricsRes] = await Promise.all([salesQuery, metricsQuery]);
 
-      const rows = data || [];
+      if (salesRes.error) throw salesRes.error;
+      if (metricsRes.error) throw metricsRes.error;
+
+      // Actualizar tabla y paginación
+      const rows = salesRes.data || [];
       setSalesData(rows);
+      setHasMore(rows.length === pageSize);
 
-      const salesTotal = rows.reduce((acc, sale) => acc + Number(sale.total), 0);
-      const uniqueCustomers = new Set(rows.map(s => s.customer_name)).size;
+      // Calcular métricas sobre el total del periodo (no solo la página actual)
+      const allPeriodRows = metricsRes.data || [];
+      const salesTotal = allPeriodRows.reduce((acc, sale) => acc + Number(sale.total), 0);
+      const uniqueCustomers = new Set(allPeriodRows.map(s => s.customer_name)).size;
 
       setMetrics({
         periodSales: salesTotal,
-        orderCount: rows.length,
+        orderCount: allPeriodRows.length,
         customerCount: uniqueCustomers,
-        averageSale: rows.length > 0 ? salesTotal / rows.length : 0
+        averageSale: allPeriodRows.length > 0 ? salesTotal / allPeriodRows.length : 0
       });
     } catch (error) {
       console.error("Error fetching dashboard data:", error);
@@ -170,15 +219,17 @@ const DashboardHome = () => {
     } finally {
       setLoading(false);
     }
-  }, [branchId, dateRange.start, dateRange.end, timeRange.start, timeRange.end, selectedPaymentMethod]);
+  }, [branchId, dateRange.start, dateRange.end, timeRange.start, timeRange.end, selectedPaymentMethod, page]);
 
   useEffect(() => {
     fetchDashboardData();
   }, [fetchDashboardData]);
 
-  // =========================
-  // REALTIME: SALES (Dashboard)
-  // =========================
+  // Resetear página al cambiar filtros
+  useEffect(() => {
+    setPage(0);
+  }, [dateRange, timeRange, selectedPaymentMethod]);
+
   useEffect(() => {
     if (!branchId) return;
 
@@ -193,7 +244,6 @@ const DashboardHome = () => {
           filter: `branch_id=eq.${branchId}`,
         },
         () => {
-          // delay para que la venta + sale_items ya estén persistidos
           if (realtimeTimerRef.current) clearTimeout(realtimeTimerRef.current);
           realtimeTimerRef.current = setTimeout(() => {
             fetchDashboardData();
@@ -234,7 +284,7 @@ const DashboardHome = () => {
       if (error) throw error;
 
       toast({ title: "Venta eliminada y stock restaurado" });
-      fetchDashboardData(); // realtime igual lo hará, pero esto da feedback inmediato
+      fetchDashboardData();
     } catch (error) {
       toast({ title: "Error al eliminar venta", variant: "destructive" });
     }
@@ -329,6 +379,9 @@ const DashboardHome = () => {
         loading={loading}
         onDelete={handleDeleteSale}
         paymentMethods={availableMethods}
+        page={page}
+        setPage={setPage}
+        hasMore={hasMore}
       />
     </div>
   );
