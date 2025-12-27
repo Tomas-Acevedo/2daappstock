@@ -32,7 +32,8 @@ const OrdersPage = () => {
   const itemsPerPage = 15;
 
   const [productSearch, setProductSearch] = useState('');
-  const [branchDetails, setBranchDetails] = useState({ name: '', logo_url: '' });
+  // Se agregaron address y tel al estado inicial
+  const [branchDetails, setBranchDetails] = useState({ name: '', logo_url: '', address: '', tel: '' });
 
   const [orderForm, setOrderForm] = useState({
     client_name: '', products: [], custom_products: [], 
@@ -53,7 +54,8 @@ const OrdersPage = () => {
 
   useEffect(() => {
     const fetchBranchInfo = async () => {
-      const { data } = await supabase.from('branches').select('name, logo_url').eq('id', branchId).single();
+      // Se agregaron address y tel a la consulta
+      const { data } = await supabase.from('branches').select('name, logo_url, address, tel').eq('id', branchId).single();
       if (data) setBranchDetails(data);
     };
     if (branchId) fetchBranchInfo();
@@ -90,32 +92,16 @@ const OrdersPage = () => {
 
   useEffect(() => { if (branchId) { fetchOrders(); fetchSummary(); } }, [fetchOrders, fetchSummary]);
 
-  // ✅ Realtime: refrescar pedidos en vivo cuando cambia algo en esta sucursal
-useEffect(() => {
-  if (!branchId) return;
-
-  const channel = supabase
-    .channel(`realtime:orders:${branchId}`)
-    .on(
-      "postgres_changes",
-      {
-        event: "*",
-        schema: "public",
-        table: "orders",
-        filter: `branch_id=eq.${branchId}`,
-      },
-      () => {
-        fetchOrders();
-        fetchSummary();
-      }
-    )
-    .subscribe();
-
-  return () => {
-    supabase.removeChannel(channel);
-  };
-}, [branchId, fetchOrders, fetchSummary]);
-
+  useEffect(() => {
+    if (!branchId) return;
+    const channel = supabase
+      .channel(`realtime:orders:${branchId}`)
+      .on("postgres_changes", { event: "*", schema: "public", table: "orders", filter: `branch_id=eq.${branchId}` }, () => {
+        fetchOrders(); fetchSummary();
+      })
+      .subscribe();
+    return () => { supabase.removeChannel(channel); };
+  }, [branchId, fetchOrders, fetchSummary]);
 
   useEffect(() => {
     const getProds = async () => {
@@ -186,7 +172,6 @@ useEffect(() => {
     setIsDetailsOpen(true);
   };
 
-  // ✅ GENERACIÓN DE PDF: Corregido para abrir en nueva pestaña usando el visor del navegador
   const generatePDF = (order) => {
     const currencySymbol = order.currency === 'USD' ? 'US$' : '$';
     const allProducts = [...(order.products || []), ...(order.custom_products || [])];
@@ -207,7 +192,8 @@ useEffect(() => {
             <p style="margin: 5px 0;"><strong style="text-transform: uppercase; color: #555;">FECHA:</strong> ${formatDateTime(order.order_date).split(',')[0]}</p>
           </div>
           <div style="text-align: right;">
-            <p style="margin: 5px 0;"><strong style="text-transform: uppercase; color: #555;">ESTADO:</strong> ${order.status.toUpperCase()}</p>
+            <p style="margin: 5px 0;"><strong style="text-transform: uppercase; color: #555;">DIRECCIÓN:</strong> ${branchDetails.address || 'No disponible'}</p>
+            <p style="margin: 5px 0;"><strong style="text-transform: uppercase; color: #555;">WHATSAPP:</strong> ${branchDetails.tel || 'No disponible'}</p>
           </div>
         </div>
 
@@ -245,13 +231,13 @@ useEffect(() => {
           <div style="width: 250px; font-size: 14px; color: #555; display: flex; justify-content: space-between;">
             <span style="text-transform: uppercase;">PENDIENTE:</span> <span>${currencySymbol}${Number(order.pending_amount).toLocaleString('es-AR')}</span>
           </div>
-          <div style="width: 280px; border-top: 4px solid #000; margin-top: 15px; padding-top: 15px; display: flex; justify-content: space-between; font-size: 32px; font-weight: 900; color: #000;">
+          <div style="width: 280px; border-top: 4px solid #000; margin-top: 15px; padding-top: 15px; display: flex; justify-content: space-between; font-size: 20px; font-weight: 900; color: #000;">
             <span style="text-transform: uppercase;">TOTAL:</span> <span>${currencySymbol}${Number(order.total_amount).toLocaleString('es-AR')}</span>
           </div>
         </div>
 
-        <div style="margin-top: 80px; text-align: center; font-size: 10px; color: #aaa; border-top: 1px solid #f0f0f0; padding-top: 20px;">
-          Generado digitalmente por sistema de gestión - ${new Date().toLocaleDateString('es-AR')}
+        <div style="margin-top: 80px; text-align: center; font-size: 18px; font-weight: 900; color: #000; text-transform: uppercase; letter-spacing: 1px;">
+          Gracias por su compra
         </div>
       </div>
     `;
@@ -264,20 +250,16 @@ useEffect(() => {
       jsPDF: { unit: 'in', format: 'A4', orientation: 'portrait' }
     };
 
-    // 1. Abrimos ventana vacía inmediatamente para evitar bloqueo de pop-ups
     const pdfWindow = window.open("", "_blank");
     if (pdfWindow) {
       pdfWindow.document.write("<title>Generando Pedido...</title><body style='display:flex; justify-content:center; align-items:center; height:100vh; font-family:sans-serif; color:#666;'>Cargando visor de PDF...</body>");
     }
 
-    // 2. Generamos el PDF
     window.html2pdf().from(element).set(opt).toPdf().get('pdf').then((pdf) => {
       const blob = pdf.output('blob');
       const file = new Blob([blob], { type: 'application/pdf' });
       const fileURL = URL.createObjectURL(file);
-      
       if (pdfWindow) {
-        // 3. Redirigimos la ventana al PDF
         pdfWindow.location.href = fileURL;
       } else {
         window.open(fileURL, '_blank');
@@ -412,26 +394,19 @@ useEffect(() => {
                         <Button size="sm" variant="ghost" className="rounded-xl hover:bg-indigo-50 font-bold" onClick={() => handleShowDetails(order)}><Eye className="w-4 h-4 mr-2" /> Detalle</Button>
                         <Button size="sm" variant="ghost" className="rounded-xl hover:bg-yellow-50 font-bold" onClick={() => handleEditOrder(order)}><Edit className="w-4 h-4 mr-2" /> Editar</Button>
                         <Button 
-  size="sm" 
-  variant="ghost" 
-  className="rounded-xl hover:bg-red-50 text-red-600 font-bold" 
-  onClick={async () => { 
-    if(confirm("¿Estás seguro de eliminar este pedido?")) {
-      const { error } = await supabase.from('orders').delete().eq('id', order.id);
-      if (error) {
-        toast({ title: "Error al eliminar", variant: "destructive" });
-      } else {
-        // No es estrictamente necesario llamar a fetchOrders() aquí 
-        // si el Realtime funciona, pero ayuda a la velocidad percibida.
-        toast({ title: "Pedido eliminado correctamente" });
-        fetchOrders(); 
-        fetchSummary();
-      }
-    } 
-  }}
->
-  <Trash2 className="w-4 h-4" />
-</Button>
+                          size="sm" 
+                          variant="ghost" 
+                          className="rounded-xl hover:bg-red-50 text-red-600 font-bold" 
+                          onClick={async () => { 
+                            if(confirm("¿Estás seguro de eliminar este pedido?")) {
+                              const { error } = await supabase.from('orders').delete().eq('id', order.id);
+                              if (error) { toast({ title: "Error al eliminar", variant: "destructive" }); }
+                              else { toast({ title: "Pedido eliminado correctamente" }); fetchOrders(); fetchSummary(); }
+                            } 
+                          }}
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </Button>
                       </div>
                     </div>
                   </div>

@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useParams } from 'react-router-dom';
 import { motion } from 'framer-motion';
-import { Wallet, Plus, Calendar, Loader2, Clock, Trash2, Lock, Package, CreditCard } from 'lucide-react';
+import { Wallet, Plus, Calendar, Loader2, Clock, Trash2, Lock, Package, CreditCard, Info } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { toast } from '@/components/ui/use-toast';
@@ -76,7 +76,6 @@ const CashRegister = () => {
       setRegisterData(currentRegister);
 
       if (currentRegister) {
-        // Obtenemos ventas con sus items y el payment_method
         const { data: sales, error: salesError } = await supabase
           .from('sales')
           .select('*, sale_items(product_name, quantity, unit_price)')
@@ -252,8 +251,6 @@ const CashRegister = () => {
                   <div className="flex justify-between items-start mb-3">
                     <div className="space-y-1.5 flex-1">
                       <p className="font-bold text-gray-900 leading-none">{sale.customer_name === 'Cliente General' ? 'Venta Mostrador' : sale.customer_name}</p>
-                      
-                      {/* ✅ MÉTODO DE PAGO ESPECÍFICO */}
                       <div className="flex items-center gap-2">
                         <span className="text-[11px] text-gray-400 uppercase font-medium">{formatDateTime(sale.created_at).split(',')[1]} hs</span>
                         <div className="flex items-center gap-1 bg-green-50 text-green-700 px-1.5 py-0.5 rounded border border-green-100">
@@ -264,8 +261,6 @@ const CashRegister = () => {
                     </div>
                     <span className="text-xl font-black text-green-600">+{formatCurrency(sale.total)}</span>
                   </div>
-                  
-                  {/* DETALLE DE PRODUCTOS */}
                   <div className="bg-gray-50/50 rounded-lg p-3 border border-gray-100 mt-2">
                     <div className="flex items-center gap-1.5 mb-2 border-b border-gray-200/60 pb-1.5">
                       <Package className="w-3.5 h-3.5 text-gray-400" />
@@ -294,7 +289,6 @@ const CashRegister = () => {
             </div>
           </div>
 
-          {/* EGRESOS MANTENIDOS IGUAL */}
           <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden tabular-nums">
             <div className="p-4 border-b bg-gray-50/50 flex justify-between items-center">
               <h3 className="font-semibold text-red-600 text-sm uppercase tracking-wider">Egresos de Caja</h3>
@@ -324,7 +318,6 @@ const CashRegister = () => {
         </div>
       )}
 
-      {/* DIALOGS MANTENIDOS IGUAL */}
       <Dialog open={isStartDialogOpen} onOpenChange={setIsStartDialogOpen}>
         <DialogContent className="bg-white rounded-2xl">
           <DialogHeader><DialogTitle className="text-xl font-bold">Abrir Caja</DialogTitle></DialogHeader>
@@ -343,12 +336,24 @@ const CashRegister = () => {
           <DialogHeader><DialogTitle className="text-xl font-bold">Nuevo Egreso</DialogTitle></DialogHeader>
           <div className="py-4 space-y-4">
             <div className="flex bg-gray-100 p-1 rounded-xl">
-              <button onClick={() => setExpenseForm({ ...expenseForm, isWithdrawal: false })} className={`flex-1 py-2 text-xs font-bold rounded-lg ${!expenseForm.isWithdrawal ? 'bg-white text-indigo-600' : 'text-gray-500'}`}>GASTO</button>
-              <button onClick={() => setExpenseForm({ ...expenseForm, isWithdrawal: true })} className={`flex-1 py-2 text-xs font-bold rounded-lg ${expenseForm.isWithdrawal ? 'bg-white text-amber-600' : 'text-gray-500'}`}>RETIRO</button>
+              <button onClick={() => setExpenseForm({ ...expenseForm, isWithdrawal: false })} className={`flex-1 py-2 text-xs font-bold rounded-lg transition-all ${!expenseForm.isWithdrawal ? 'bg-white text-indigo-600 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>GASTO</button>
+              <button onClick={() => setExpenseForm({ ...expenseForm, isWithdrawal: true })} className={`flex-1 py-2 text-xs font-bold rounded-lg transition-all ${expenseForm.isWithdrawal ? 'bg-white text-amber-600 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>RETIRO</button>
             </div>
+
+            {/* TEXTO EXPLICATIVO SEGÚN SELECCIÓN */}
+            <div className={`p-3 rounded-xl border flex gap-3 items-start transition-colors ${expenseForm.isWithdrawal ? 'bg-amber-50 border-amber-100 text-amber-800' : 'bg-indigo-50 border-indigo-100 text-indigo-800'}`}>
+              <Info className="w-5 h-5 mt-0.5 shrink-0" />
+              <p className="text-xs font-medium leading-relaxed">
+                {expenseForm.isWithdrawal 
+                  ? "Este retiro no se registrará como gasto, solo afectará el saldo de caja."
+                  : "Un gasto registra salidas de dinero para pagos de proveedores, servicios o insumos. Este movimiento afectará el reporte de la caja."
+                }
+              </p>
+            </div>
+
             <div className="space-y-1.5">
               <label className="text-xs font-black uppercase text-gray-400">Descripción</label>
-              <Input value={expenseForm.description} onChange={(e) => setExpenseForm({ ...expenseForm, description: e.target.value })} className="h-12 rounded-xl" />
+              <Input placeholder={expenseForm.isWithdrawal ? "Ej: Retiro para el banco" : "Ej: Pago de flete"} value={expenseForm.description} onChange={(e) => setExpenseForm({ ...expenseForm, description: e.target.value })} className="h-12 rounded-xl" />
             </div>
             <div className="space-y-1.5">
               <label className="text-xs font-black uppercase text-gray-400">Monto</label>
@@ -356,7 +361,7 @@ const CashRegister = () => {
             </div>
           </div>
           <DialogFooter>
-            <Button onClick={handleAddExpense} className={`w-full h-12 text-white font-black uppercase text-xs rounded-xl ${expenseForm.isWithdrawal ? 'bg-amber-600' : 'bg-red-600'}`}>Confirmar</Button>
+            <Button onClick={handleAddExpense} className={`w-full h-12 text-white font-black uppercase text-xs rounded-xl transition-colors ${expenseForm.isWithdrawal ? 'bg-amber-600 hover:bg-amber-700' : 'bg-red-600 hover:bg-red-700'}`}>Confirmar</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
