@@ -31,7 +31,7 @@ const SalesModule = () => {
 
   const [currentPage, setCurrentPage] = useState(1);
   const [totalCount, setTotalCount] = useState(0);
-  const itemsPerPage = 20;
+  const itemsPerPage = 21;
 
   const [cart, setCart] = useState([]);
   const [selectedPaymentMethod, setSelectedPaymentMethod] = useState(null);
@@ -338,7 +338,16 @@ const SalesModule = () => {
                         <CardContent className="p-3 md:p-4">
                           <div className="flex justify-between items-start mb-2">
                             <div className="h-8 w-8 md:h-10 md:w-10 rounded-lg bg-indigo-50 flex items-center justify-center text-indigo-600 font-bold text-[10px] md:text-xs uppercase">{product.name.substring(0, 2)}</div>
-                            <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-medium ${product.stock > 5 ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>Stock: {product.stock}</span>
+                            <span
+  className={`text-[10px] px-1.5 py-0.5 rounded-full font-medium ${
+    product.stock > 0
+      ? 'bg-green-100 text-green-700'
+      : 'bg-red-100 text-red-700'
+  }`}
+>
+  Stock: {product.stock}
+</span>
+
                           </div>
                           <h3 className="text-xs md:text-sm font-medium text-gray-900 line-clamp-2 h-8 md:h-10 mb-1">{product.name}</h3>
                           <p className="text-sm md:text-lg font-bold text-indigo-600">{formatCurrency(product.price)}</p>
