@@ -220,6 +220,25 @@ const SalesModule = () => {
 
   const removeFromCart = (productId) => setCart(prev => prev.filter(p => p.id !== productId));
 
+  const handleQuantityChange = (productId, value, stock) => {
+  const newQty = parseInt(value, 10);
+  
+  // Si está vacío o no es un número, lo dejamos vacío temporalmente para permitir borrar y escribir
+  if (isNaN(newQty)) {
+    setCart(prev => prev.map(p => p.id === productId ? { ...p, quantity: "" } : p));
+    return;
+  }
+
+  // Validaciones de rango
+  if (newQty < 1) return;
+  if (newQty > stock) {
+    toast({ title: "Stock insuficiente", variant: "destructive" });
+    return;
+  }
+
+  setCart(prev => prev.map(p => p.id === productId ? { ...p, quantity: newQty } : p));
+};
+
   const updateQuantity = (productId, delta) => {
     setCart(prev => prev.map(p => {
       if (p.id === productId) {
@@ -405,11 +424,34 @@ const SalesModule = () => {
                         </div>
                         <div className="flex justify-between items-center">
                           <p className="text-xs text-indigo-600 font-bold">{formatCurrency(item.price)}</p>
-                          <div className="flex items-center gap-1 bg-white rounded-md border border-gray-200">
-                            <button onClick={() => updateQuantity(item.id, -1)} className="p-1.5 hover:bg-gray-100"><Minus className="w-3 h-3" /></button>
-                            <span className="text-xs w-6 text-center font-bold">{item.quantity}</span>
-                            <button onClick={() => updateQuantity(item.id, 1)} className="p-1.5 hover:bg-gray-100"><Plus className="w-3 h-3" /></button>
-                          </div>
+                          <div className="flex items-center gap-1 bg-white rounded-md border border-gray-200 overflow-hidden">
+  <button 
+    onClick={() => updateQuantity(item.id, -1)} 
+    className="p-1.5 hover:bg-gray-100 border-r"
+  >
+    <Minus className="w-3 h-3" />
+  </button>
+  
+  <input
+    type="number"
+    value={item.quantity}
+    onChange={(e) => handleQuantityChange(item.id, e.target.value, item.stock)}
+    onBlur={() => {
+      // Si al salir del input está vacío, volvemos a 1
+      if (item.quantity === "" || item.quantity < 1) {
+        setCart(prev => prev.map(p => p.id === item.id ? { ...p, quantity: 1 } : p));
+      }
+    }}
+    className="w-10 text-center text-xs font-bold bg-transparent outline-none [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+  />
+
+  <button 
+    onClick={() => updateQuantity(item.id, 1)} 
+    className="p-1.5 hover:bg-gray-100 border-l"
+  >
+    <Plus className="w-3 h-3" />
+  </button>
+</div>
                         </div>
                       </div>
                     ))

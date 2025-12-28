@@ -352,28 +352,26 @@ const DashboardHome = () => {
         </div>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-        {[
-          { title: "Ventas (Periodo)", value: formatCurrency(metrics.periodSales), desc: "Total facturado en rango", icon: DollarSign, color: "text-green-600" },
-          { title: "Transacciones", value: metrics.orderCount, desc: "Ventas realizadas", icon: ShoppingBag, color: "text-indigo-600" },
-          { title: "Promedio por Venta", value: formatCurrency(metrics.averageSale), desc: "Ticket promedio", icon: TrendingUp, color: "text-blue-600" },
-          { title: "Clientes Únicos", value: metrics.customerCount, desc: "En el periodo seleccionado", icon: Users, color: "text-orange-600" }
-        ].map((item, i) => (
-          <motion.div key={i} initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.1 * (i + 1) }}>
-            <Card className="shadow-sm">
-              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                <CardTitle className="text-sm font-black uppercase tracking-wider text-gray-500">{item.title}</CardTitle>
-                <item.icon className={`h-5 w-5 ${item.color}`} />
-              </CardHeader>
-              <CardContent>
-                <div className="text-2xl font-black text-gray-900">{loading ? "..." : item.value}</div>
-                <p className="text-xs text-muted-foreground mt-1">{item.desc}</p>
-              </CardContent>
-            </Card>
-          </motion.div>
-        ))}
-      </div>
-
+<div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+  {[
+    { title: "Ventas (Periodo)", value: formatCurrency(metrics.periodSales), desc: "Total facturado en rango", icon: DollarSign, color: "text-green-600" },
+    { title: "Transacciones", value: metrics.orderCount, desc: "Ventas realizadas", icon: ShoppingBag, color: "text-indigo-600" },
+    { title: "Promedio por Venta", value: formatCurrency(metrics.averageSale), desc: "Ticket promedio", icon: TrendingUp, color: "text-blue-600" }
+  ].map((item, i) => (
+    <motion.div key={i} initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.1 * (i + 1) }}>
+      <Card className="shadow-sm">
+        <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+          <CardTitle className="text-sm font-black uppercase tracking-wider text-gray-500">{item.title}</CardTitle>
+          <item.icon className={`h-5 w-5 ${item.color}`} />
+        </CardHeader>
+        <CardContent>
+          <div className="text-2xl font-black text-gray-900">{loading ? "..." : item.value}</div>
+          <p className="text-xs text-muted-foreground mt-1">{item.desc}</p>
+        </CardContent>
+      </Card>
+    </motion.div>
+  ))}
+</div>
       <SalesTable
         sales={salesData}
         loading={loading}
