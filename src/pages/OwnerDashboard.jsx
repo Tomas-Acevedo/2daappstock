@@ -113,10 +113,12 @@ const OwnerDashboard = () => {
           
           <Dialog open={isNewBranchOpen} onOpenChange={setIsNewBranchOpen}>
             <DialogTrigger asChild>
-              <Button className="bg-indigo-600 hover:bg-indigo-700 text-white shadow-md hover:shadow-lg transition-all">
+           {/*  
+                  BOTÓN NUEVA SUCURSAL
+           <Button className="bg-indigo-600 hover:bg-indigo-700 text-white shadow-md hover:shadow-lg transition-all">
                 <Plus className="w-5 h-5 mr-2" />
-                Nueva Sucursal
-              </Button>
+              Nueva Sucursal
+             </Button>*/}
             </DialogTrigger>
             <DialogContent className="sm:max-w-[500px]">
               <DialogHeader>
