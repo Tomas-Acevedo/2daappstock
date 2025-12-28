@@ -189,7 +189,7 @@ const OwnerDashboard = () => {
                 </div>
                 
                 <div className="mt-4 flex justify-between items-center">
-                  <span className="text-xs text-gray-400 font-mono">ID: {branch.id.slice(0, 6)}</span>
+                  <span className="text-xs text-gray-400 font-mono"></span>
                   <span className="bg-green-100 text-green-700 px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wide">Activa</span>
                 </div>
               </motion.div>
