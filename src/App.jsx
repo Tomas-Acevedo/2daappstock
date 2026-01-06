@@ -4,6 +4,7 @@ import { Helmet } from "react-helmet";
 import { Toaster } from "@/components/ui/toaster";
 
 import { AuthProvider } from "@/contexts/AuthContext";
+import { OfflineProvider } from "@/contexts/OfflineContext";
 import ProtectedRoute from "@/components/ProtectedRoute";
 
 import LoginPage from "@/pages/LoginPage";
@@ -13,59 +14,57 @@ import BranchDashboard from "@/pages/BranchDashboard";
 import ScanProvider from "@/scan/ScanProvider";
 import GlobalScanListener from "@/scan/GlobalScanListener";
 import ScanDialog from "@/scan/ScanDialog";
-import OfflineBlocker from "@/components/OfflineBlocker";
+
+import OfflineBanner from "@/components/OfflineBanner";
 
 function App() {
   return (
     <AuthProvider>
-<ScanProvider>
-      <Router>
-        <OfflineBlocker />
-        <GlobalScanListener />
-        <Helmet>
-          <title> Gestify</title>
-          <meta
-            name="description"
-            content="Sistema ERP completo para la gestión de franquicias con Torre de Control, gestión de sucursales y control de personal"
-          />
-        </Helmet>
+      <OfflineProvider>
+        <ScanProvider>
+          <Router>
+            <OfflineBanner />
+            <GlobalScanListener />
 
-        <Routes>
-          {/* Public */}
-          <Route path="/login" element={<LoginPage />} />
-          <Route path="/post-login" element={<PostLoginRedirect />} />
+            <Helmet>
+              <title>Gestify</title>
+              <meta
+                name="description"
+                content="Sistema ERP completo para la gestión de franquicias con Torre de Control, gestión de sucursales y control de personal"
+              />
+            </Helmet>
 
-          {/* Protected */}
-          <Route
-            path="/torre-control"
-            element={
-              <ProtectedRoute requiredRole="owner">
-                <OwnerDashboard />
-              </ProtectedRoute>
-            }
-          />
+            <Routes>
+              <Route path="/login" element={<LoginPage />} />
+              <Route path="/post-login" element={<PostLoginRedirect />} />
 
-          <Route
-            path="/branch/:branchId/*"
-            element={
-              <ProtectedRoute>
-                <BranchDashboard />
-              </ProtectedRoute>
-            }
-          />
+              <Route
+                path="/torre-control"
+                element={
+                  <ProtectedRoute requiredRole="owner">
+                    <OwnerDashboard />
+                  </ProtectedRoute>
+                }
+              />
 
-          {/* Default */}
-          <Route path="/" element={<PostLoginRedirect />} />
+              <Route
+                path="/branch/:branchId/*"
+                element={
+                  <ProtectedRoute>
+                    <BranchDashboard />
+                  </ProtectedRoute>
+                }
+              />
 
+              <Route path="/" element={<PostLoginRedirect />} />
+              <Route path="*" element={<Navigate to="/" replace />} />
+            </Routes>
 
-          {/* Catch-all (recomendado) */}
-          <Route path="*" element={<Navigate to="/" replace />} />
-        </Routes>
-
-        <Toaster />
-        <ScanDialog />
-      </Router>
-      </ScanProvider>
+            <Toaster />
+            <ScanDialog />
+          </Router>
+        </ScanProvider>
+      </OfflineProvider>
     </AuthProvider>
   );
 }

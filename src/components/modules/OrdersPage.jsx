@@ -3,7 +3,7 @@ import { useParams } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { 
   Plus, Search, FileText, Eye, Edit, Trash2, 
-  Calendar, Package, Info, ChevronLeft, ChevronRight, Loader2, StickyNote 
+  Calendar, Package, Info, Loader2, StickyNote 
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input'; 
@@ -13,8 +13,22 @@ import { toast } from '@/components/ui/use-toast';
 import { formatCurrency, formatDateTime, getArgentinaDate } from '@/lib/utils';
 import { Card, CardContent } from "@/components/ui/card";
 
+// ✅ Importaciones de contexto y helpers offline
+import { useOffline } from "@/contexts/OfflineContext";
+import {
+  cacheOrders,
+  getOrdersOffline,
+  computeOrdersSummaryOffline,
+  upsertLocalOrder,
+  deleteLocalOrder,
+  enqueueAction,
+  initOfflineDb,
+} from "@/lib/offlineDb";
+
 const OrdersPage = () => {
   const { branchId } = useParams();
+  const { online, syncing } = useOffline(); // ✅ Estado de conexión
+
   const [orders, setOrders] = useState([]);
   const [loading, setLoading] = useState(true);
   const [isDialogOpen, setIsDialogOpen] = useState(false);
@@ -32,7 +46,6 @@ const OrdersPage = () => {
   const itemsPerPage = 15;
 
   const [productSearch, setProductSearch] = useState('');
-  // Se agregaron address y tel al estado inicial
   const [branchDetails, setBranchDetails] = useState({ name: '', logo_url: '', address: '', tel: '' });
 
   const [orderForm, setOrderForm] = useState({
@@ -52,48 +65,87 @@ const OrdersPage = () => {
     }
   };
 
+  // ✅ 3.3 Fetch Orders con fallback offline
+  const fetchOrders = useCallback(async () => {
+    setLoading(true);
+    try {
+      if (!online) {
+        await initOfflineDb();
+        const { rows, totalCount: count } = await getOrdersOffline({
+          branchId,
+          currentPage,
+          itemsPerPage,
+          searchTerm,
+          dateFilter,
+        });
+        setOrders(rows || []);
+        setTotalCount(count || 0);
+        return;
+      }
+
+      const from = (currentPage - 1) * itemsPerPage;
+      const to = from + itemsPerPage - 1;
+
+      let query = supabase
+        .from("orders")
+        .select("*", { count: "exact" })
+        .eq("branch_id", branchId)
+        .order("order_date", { ascending: false })
+        .order("created_at", { ascending: false })
+        .range(from, to);
+
+      if (searchTerm) query = query.or(`client_name.ilike.%${searchTerm}%,notes.ilike.%${searchTerm}%`);
+      if (dateFilter.start) query = query.gte("order_date", `${dateFilter.start}T00:00:00-03:00`);
+      if (dateFilter.end) query = query.lte("order_date", `${dateFilter.end}T23:59:59-03:00`);
+
+      const { data, count, error } = await query;
+      if (!error) {
+        setOrders(data || []);
+        setTotalCount(count || 0);
+        if (data) await cacheOrders(data);
+      }
+    } finally {
+      setLoading(false);
+    }
+  }, [branchId, currentPage, itemsPerPage, searchTerm, dateFilter, online]);
+
+  // ✅ 3.4 Fetch Summary con fallback offline
+  const fetchSummary = useCallback(async () => {
+    try {
+      if (!online) {
+        const res = await computeOrdersSummaryOffline({ branchId, dateFilter });
+        setSummary(res);
+        return;
+      }
+
+      let query = supabase.from("orders").select("pending_amount, currency").eq("branch_id", branchId);
+      if (dateFilter.start) query = query.gte("order_date", `${dateFilter.start}T00:00:00-03:00`);
+      if (dateFilter.end) query = query.lte("order_date", `${dateFilter.end}T23:59:59-03:00`);
+
+      const { data } = await query;
+      if (data) {
+        const ars = data.filter(o => o.currency === "ARS").reduce((acc, o) => acc + Number(o.pending_amount || 0), 0);
+        const usd = data.filter(o => o.currency === "USD").reduce((acc, o) => acc + Number(o.pending_amount || 0), 0);
+        setSummary({ pendingARS: ars, pendingUSD: usd });
+      }
+    } catch (e) {
+      console.error(e);
+    }
+  }, [branchId, dateFilter, online]);
+
   useEffect(() => {
     const fetchBranchInfo = async () => {
-      // Se agregaron address y tel a la consulta
       const { data } = await supabase.from('branches').select('name, logo_url, address, tel').eq('id', branchId).single();
       if (data) setBranchDetails(data);
     };
     if (branchId) fetchBranchInfo();
   }, [branchId]);
 
-  const filteredInventoryProducts = useMemo(() => {
-    return products.filter(p => p.name.toLowerCase().includes(productSearch.toLowerCase()));
-  }, [products, productSearch]);
-
-  const fetchOrders = useCallback(async () => {
-    setLoading(true);
-    const from = (currentPage - 1) * itemsPerPage;
-    const to = from + itemsPerPage - 1;
-    let query = supabase.from('orders').select('*', { count: 'exact' }).eq('branch_id', branchId).order('order_date', { ascending: false }).order('created_at', { ascending: false }).range(from, to);
-    if (searchTerm) query = query.or(`client_name.ilike.%${searchTerm}%,notes.ilike.%${searchTerm}%`);
-    if (dateFilter.start) query = query.gte('order_date', `${dateFilter.start}T00:00:00-03:00`);
-    if (dateFilter.end) query = query.lte('order_date', `${dateFilter.end}T23:59:59-03:00`);
-    const { data, count, error } = await query;
-    if (!error) { setOrders(data || []); setTotalCount(count || 0); }
-    setLoading(false);
-  }, [branchId, currentPage, searchTerm, dateFilter]);
-
-  const fetchSummary = useCallback(async () => {
-    let query = supabase.from('orders').select('pending_amount, currency').eq('branch_id', branchId);
-    if (dateFilter.start) query = query.gte('order_date', `${dateFilter.start}T00:00:00-03:00`);
-    if (dateFilter.end) query = query.lte('order_date', `${dateFilter.end}T23:59:59-03:00`);
-    const { data } = await query;
-    if (data) {
-      const ars = data.filter(o => o.currency === 'ARS').reduce((acc, o) => acc + Number(o.pending_amount), 0);
-      const usd = data.filter(o => o.currency === 'USD').reduce((acc, o) => acc + Number(o.pending_amount), 0);
-      setSummary({ pendingARS: ars, pendingUSD: usd });
-    }
-  }, [branchId, dateFilter]);
-
   useEffect(() => { if (branchId) { fetchOrders(); fetchSummary(); } }, [fetchOrders, fetchSummary]);
 
+  // ✅ 3.5 Realtime guardado por conexión
   useEffect(() => {
-    if (!branchId) return;
+    if (!branchId || !online) return;
     const channel = supabase
       .channel(`realtime:orders:${branchId}`)
       .on("postgres_changes", { event: "*", schema: "public", table: "orders", filter: `branch_id=eq.${branchId}` }, () => {
@@ -101,7 +153,14 @@ const OrdersPage = () => {
       })
       .subscribe();
     return () => { supabase.removeChannel(channel); };
-  }, [branchId, fetchOrders, fetchSummary]);
+  }, [branchId, online, fetchOrders, fetchSummary]);
+
+  // ✅ 3.6 Listener de sincronización
+  useEffect(() => {
+    const h = () => { fetchOrders(); fetchSummary(); };
+    window.addEventListener("orders:refresh", h);
+    return () => window.removeEventListener("orders:refresh", h);
+  }, [fetchOrders, fetchSummary]);
 
   useEffect(() => {
     const getProds = async () => {
@@ -110,6 +169,10 @@ const OrdersPage = () => {
     };
     if(branchId) getProds();
   }, [branchId]);
+
+  const filteredInventoryProducts = useMemo(() => {
+    return products.filter(p => p.name.toLowerCase().includes(productSearch.toLowerCase()));
+  }, [products, productSearch]);
 
   const calculateTotal = () => {
     const stockTotal = orderForm.products.reduce((acc, p) => acc + (Number(p.price) * Number(p.quantity)), 0);
@@ -137,18 +200,66 @@ const OrdersPage = () => {
     else setOrderForm(prev => ({ ...prev, custom_products: prev.custom_products.filter((_, i) => i !== index) }));
   };
 
+  // ✅ 3.7 handleSubmit híbrido
   const handleSubmitOrder = async () => {
-    if (!orderForm.client_name.trim()) { toast({ title: "Error", description: "Ingresa el nombre del cliente", variant: "destructive" }); return; }
+    if (!orderForm.client_name.trim()) {
+      toast({ title: "Error", description: "Ingresa el nombre del cliente", variant: "destructive" });
+      return;
+    }
+
     const total = calculateTotal();
     const pending = total - Number(orderForm.paid_amount);
-    let status = pending <= 0 ? 'Pagado' : Number(orderForm.paid_amount) > 0 ? 'Parcial' : 'Pendiente';
-    const payload = { ...orderForm, branch_id: branchId, total_amount: total, pending_amount: pending, order_date: `${orderForm.order_date}T12:00:00-03:00`, status: status };
+    const status = pending <= 0 ? "Pagado" : Number(orderForm.paid_amount) > 0 ? "Parcial" : "Pendiente";
+
+    const payload = {
+      ...orderForm,
+      branch_id: branchId,
+      total_amount: total,
+      pending_amount: pending,
+      order_date: `${orderForm.order_date}T12:00:00-03:00`,
+      status,
+    };
+
     try {
-      if (editingOrder) await supabase.from('orders').update(payload).eq('id', editingOrder.id);
-      else await supabase.from('orders').insert([payload]);
-      setIsDialogOpen(false); resetForm(); fetchOrders(); fetchSummary();
-      toast({ title: editingOrder ? "Pedido actualizado" : "Pedido creado" });
-    } catch (error) { toast({ title: "Error", variant: "destructive" }); }
+      if (online) {
+        if (editingOrder) {
+          await supabase.from("orders").update(payload).eq("id", editingOrder.id);
+        } else {
+          await supabase.from("orders").insert([payload]);
+        }
+        toast({ title: editingOrder ? "Pedido actualizado" : "Pedido creado" });
+      } else {
+        // ✅ Lógica Offline
+        const localId = editingOrder?.id && String(editingOrder.id).startsWith("local-")
+          ? editingOrder.id
+          : editingOrder ? editingOrder.id : `local-${crypto.randomUUID()}`;
+
+        const offlineOrder = {
+          id: localId,
+          ...payload,
+          created_at: editingOrder?.created_at || new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+        };
+
+        await upsertLocalOrder(offlineOrder);
+
+        if (editingOrder) {
+          await enqueueAction({ type: "order:update", payload: { id: localId, patch: payload } });
+          toast({ title: "Pedido actualizado (offline)" });
+        } else {
+          await enqueueAction({ type: "order:create", payload: { _local_id: localId, ...payload } });
+          toast({ title: "Pedido creado (offline)" });
+        }
+      }
+
+      setIsDialogOpen(false);
+      resetForm();
+      fetchOrders();
+      fetchSummary();
+    } catch (error) {
+      console.error(error);
+      toast({ title: "Error", variant: "destructive" });
+    }
   };
 
   const handleEditOrder = (order) => {
@@ -173,19 +284,21 @@ const OrdersPage = () => {
   };
 
   const generatePDF = (order) => {
+    if (!online) {
+        toast({ title: "Offline", description: "Debes estar online para generar el PDF", variant: "destructive" });
+        return;
+    }
     const currencySymbol = order.currency === 'USD' ? 'US$' : '$';
     const allProducts = [...(order.products || []), ...(order.custom_products || [])];
     const element = document.createElement('div');
     
     element.innerHTML = `
       <div style="font-family: Arial, sans-serif; padding: 40px; color: #333; background: white; width: 750px; margin: 0 auto;">
-        
         <div style="text-align: center; margin-bottom: 40px;">
           ${branchDetails.logo_url ? `<img src="${branchDetails.logo_url}" style="max-height: 120px; display: block; margin: 0 auto 15px auto;" />` : ''}
           <h1 style="font-size: 32px; font-weight: 900; margin: 0; text-transform: uppercase; letter-spacing: 1px;">${branchDetails.name || 'SUCURSAL'}</h1>
           <p style="font-size: 14px; color: #666; letter-spacing: 2px; margin-top: 10px; font-weight: bold; text-transform: uppercase;">ORDEN DE PEDIDO</p>
         </div>
-
         <div style="display: flex; justify-content: space-between; margin-bottom: 30px; font-size: 14px; border-bottom: 2px solid #f0f0f0; padding-bottom: 25px;">
           <div>
             <p style="margin: 5px 0;"><strong style="text-transform: uppercase; color: #555;">CLIENTE:</strong> ${order.client_name}</p>
@@ -196,13 +309,7 @@ const OrdersPage = () => {
             <p style="margin: 5px 0;"><strong style="text-transform: uppercase; color: #555;">WHATSAPP:</strong> ${branchDetails.tel || 'No disponible'}</p>
           </div>
         </div>
-
-        ${order.notes ? `
-          <div style="margin-bottom: 30px; padding: 15px; border: 1px solid #eee; border-radius: 6px; font-size: 13px;">
-            <strong style="color: #555;">NOTAS:</strong> <span style="font-style: italic; color: #555;">${order.notes}</span>
-          </div>
-        ` : ''}
-
+        ${order.notes ? `<div style="margin-bottom: 30px; padding: 15px; border: 1px solid #eee; border-radius: 6px; font-size: 13px;"><strong style="color: #555;">NOTAS:</strong> <span style="font-style: italic; color: #555;">${order.notes}</span></div>` : ''}
         <table style="width: 100%; border-collapse: collapse; margin-bottom: 40px;">
           <thead>
             <tr>
@@ -213,31 +320,13 @@ const OrdersPage = () => {
             </tr>
           </thead>
           <tbody>
-            ${allProducts.map(p => `
-              <tr>
-                <td style="padding: 15px 0; border-bottom: 1px solid #f1f5f9; font-size: 14px;">${p.name}</td>
-                <td style="padding: 15px 0; border-bottom: 1px solid #f1f5f9; font-size: 14px; text-align: center;">${p.quantity}</td>
-                <td style="padding: 15px 0; border-bottom: 1px solid #f1f5f9; font-size: 14px; text-align: right;">${currencySymbol}${Number(p.price).toLocaleString('es-AR')}</td>
-                <td style="padding: 15px 0; border-bottom: 1px solid #f1f5f9; font-size: 14px; text-align: right; font-weight: bold;">${currencySymbol}${(p.price * p.quantity).toLocaleString('es-AR')}</td>
-              </tr>
-            `).join('')}
+            ${allProducts.map(p => `<tr><td style="padding: 15px 0; border-bottom: 1px solid #f1f5f9; font-size: 14px;">${p.name}</td><td style="padding: 15px 0; border-bottom: 1px solid #f1f5f9; font-size: 14px; text-align: center;">${p.quantity}</td><td style="padding: 15px 0; border-bottom: 1px solid #f1f5f9; font-size: 14px; text-align: right;">${currencySymbol}${Number(p.price).toLocaleString('es-AR')}</td><td style="padding: 15px 0; border-bottom: 1px solid #f1f5f9; font-size: 14px; text-align: right; font-weight: bold;">${currencySymbol}${(p.price * p.quantity).toLocaleString('es-AR')}</td></tr>`).join('')}
           </tbody>
         </table>
-
         <div style="display: flex; flex-direction: column; align-items: flex-end; gap: 10px; margin-top: 20px;">
-          <div style="width: 250px; font-size: 14px; color: #555; display: flex; justify-content: space-between;">
-            <span style="text-transform: uppercase;">ABONADO:</span> <span>${currencySymbol}${Number(order.paid_amount).toLocaleString('es-AR')}</span>
-          </div>
-          <div style="width: 250px; font-size: 14px; color: #555; display: flex; justify-content: space-between;">
-            <span style="text-transform: uppercase;">PENDIENTE:</span> <span>${currencySymbol}${Number(order.pending_amount).toLocaleString('es-AR')}</span>
-          </div>
-          <div style="width: 280px; border-top: 4px solid #000; margin-top: 15px; padding-top: 15px; display: flex; justify-content: space-between; font-size: 20px; font-weight: 900; color: #000;">
-            <span style="text-transform: uppercase;">TOTAL:</span> <span>${currencySymbol}${Number(order.total_amount).toLocaleString('es-AR')}</span>
-          </div>
-        </div>
-
-        <div style="margin-top: 80px; text-align: center; font-size: 18px; font-weight: 900; color: #000; text-transform: uppercase; letter-spacing: 1px;">
-          Gracias por su compra
+          <div style="width: 250px; font-size: 14px; color: #555; display: flex; justify-content: space-between;"><span style="text-transform: uppercase;">ABONADO:</span> <span>${currencySymbol}${Number(order.paid_amount).toLocaleString('es-AR')}</span></div>
+          <div style="width: 250px; font-size: 14px; color: #555; display: flex; justify-content: space-between;"><span style="text-transform: uppercase;">PENDIENTE:</span> <span>${currencySymbol}${Number(order.pending_amount).toLocaleString('es-AR')}</span></div>
+          <div style="width: 280px; border-top: 4px solid #000; margin-top: 15px; padding-top: 15px; display: flex; justify-content: space-between; font-size: 20px; font-weight: 900; color: #000;"><span style="text-transform: uppercase;">TOTAL:</span> <span>${currencySymbol}${Number(order.total_amount).toLocaleString('es-AR')}</span></div>
         </div>
       </div>
     `;
@@ -251,23 +340,15 @@ const OrdersPage = () => {
     };
 
     const pdfWindow = window.open("", "_blank");
-    if (pdfWindow) {
-      pdfWindow.document.write("<title>Generando Pedido...</title><body style='display:flex; justify-content:center; align-items:center; height:100vh; font-family:sans-serif; color:#666;'>Cargando visor de PDF...</body>");
-    }
+    if (pdfWindow) pdfWindow.document.write("<title>Generando...</title><body>Cargando...</body>");
 
     window.html2pdf().from(element).set(opt).toPdf().get('pdf').then((pdf) => {
       const blob = pdf.output('blob');
-      const file = new Blob([blob], { type: 'application/pdf' });
-      const fileURL = URL.createObjectURL(file);
-      if (pdfWindow) {
-        pdfWindow.location.href = fileURL;
-      } else {
-        window.open(fileURL, '_blank');
-      }
+      const fileURL = URL.createObjectURL(blob);
+      if (pdfWindow) pdfWindow.location.href = fileURL;
+      else window.open(fileURL, '_blank');
     });
   };
-
-  const totalPages = Math.ceil(totalCount / itemsPerPage);
 
   return (
     <div className="space-y-6">
@@ -278,7 +359,9 @@ const OrdersPage = () => {
         </div>
         <Dialog open={isDialogOpen} onOpenChange={(open) => { if(!open) resetForm(); setIsDialogOpen(open); }}>
           <DialogTrigger asChild>
-            <Button className="bg-indigo-600 hover:bg-indigo-700 rounded-2xl h-12 px-6 font-bold shadow-lg uppercase text-xs tracking-widest"><Plus className="w-4 h-4 mr-2" /> Nuevo Pedido</Button>
+            <Button disabled={syncing} className="bg-indigo-600 hover:bg-indigo-700 rounded-2xl h-12 px-6 font-bold shadow-lg uppercase text-xs tracking-widest">
+              <Plus className="w-4 h-4 mr-2" /> Nuevo Pedido
+            </Button>
           </DialogTrigger>
           <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto bg-white rounded-3xl">
             <DialogHeader><DialogTitle className="text-2xl font-black">{editingOrder ? 'Editar Pedido' : 'Crear Nuevo Pedido'}</DialogTitle></DialogHeader>
@@ -327,12 +410,12 @@ const OrdersPage = () => {
               )}
 
               <div className="grid grid-cols-2 gap-4 bg-indigo-50/30 p-5 rounded-2xl">
-                <div className="space-y-1"><label className="text-[10px] font-black uppercase text-gray-400 ml-1">Moneda</label><select className="flex h-12 w-full rounded-xl border border-input bg-white px-3 py-2 text-sm font-bold focus:ring-2 focus:ring-indigo-500" value={orderForm.currency} onChange={e => setOrderForm({...orderForm, currency: e.target.value})}><option value="ARS">Peso Argentino ($)</option><option value="USD">Dólar (US$)</option></select></div>
-                <div className="space-y-1"><label className="text-[10px] font-black uppercase text-gray-400 ml-1">Abonado (Seña)</label><Input type="number" value={orderForm.paid_amount} onFocus={e => e.target.select()} onChange={e => setOrderForm({...orderForm, paid_amount: e.target.value})} className="rounded-xl h-12 bg-white font-bold text-green-600 focus:ring-2 focus:ring-green-500" /></div>
+                <div className="space-y-1"><label className="text-[10px] font-black uppercase text-gray-400 ml-1">Moneda</label><select className="flex h-12 w-full rounded-xl border border-input bg-white px-3 py-2 text-sm font-bold" value={orderForm.currency} onChange={e => setOrderForm({...orderForm, currency: e.target.value})}><option value="ARS">ARS ($)</option><option value="USD">USD (US$)</option></select></div>
+                <div className="space-y-1"><label className="text-[10px] font-black uppercase text-gray-400 ml-1">Abonado</label><Input type="number" value={orderForm.paid_amount} onFocus={e => e.target.select()} onChange={e => setOrderForm({...orderForm, paid_amount: e.target.value})} className="rounded-xl h-12 font-bold text-green-600" /></div>
               </div>
-              <div className="flex justify-between items-center bg-indigo-600 p-6 rounded-2xl text-white shadow-xl shadow-indigo-100"><span className="font-bold opacity-80 uppercase text-xs tracking-widest">Total del Pedido</span><span className="text-3xl font-black">{orderForm.currency === 'USD' ? 'US$' : '$'}{calculateTotal().toLocaleString('es-AR')}</span></div>
+              <div className="flex justify-between items-center bg-indigo-600 p-6 rounded-2xl text-white shadow-xl shadow-indigo-100"><span className="font-bold uppercase text-xs tracking-widest">Total</span><span className="text-3xl font-black">{orderForm.currency === 'USD' ? 'US$' : '$'}{calculateTotal().toLocaleString('es-AR')}</span></div>
             </div>
-            <DialogFooter><Button variant="ghost" onClick={() => setIsDialogOpen(false)} className="font-bold rounded-xl">Cancelar</Button><Button onClick={handleSubmitOrder} className="bg-indigo-600 hover:bg-indigo-700 rounded-xl h-12 px-8 font-black uppercase text-xs tracking-wider">Guardar</Button></DialogFooter>
+            <DialogFooter><Button variant="ghost" onClick={() => setIsDialogOpen(false)} className="rounded-xl">Cancelar</Button><Button disabled={syncing} onClick={handleSubmitOrder} className="bg-indigo-600 rounded-xl h-12 px-8 font-black uppercase text-xs">Guardar</Button></DialogFooter>
           </DialogContent>
         </Dialog>
       </div>
@@ -343,77 +426,76 @@ const OrdersPage = () => {
              <div className="space-y-1"><label className="text-[10px] font-black uppercase text-gray-400 ml-1">Buscar</label><div className="relative"><Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" /><Input placeholder="Cliente o nota..." className="pl-9 w-full md:w-64 rounded-xl border-gray-200" value={searchTerm} onChange={e => setSearchTerm(e.target.value)} /></div></div>
              <div className="space-y-1"><label className="text-[10px] font-black uppercase text-gray-400 ml-1">Desde</label><Input type="date" className="w-full md:w-44 rounded-xl border-gray-200" value={dateFilter.start} onChange={e => setDateFilter({...dateFilter, start: e.target.value})} /></div>
              <div className="space-y-1"><label className="text-[10px] font-black uppercase text-gray-400 ml-1">Hasta</label><Input type="date" className="w-full md:w-44 rounded-xl border-gray-200" value={dateFilter.end} onChange={e => setDateFilter({...dateFilter, end: e.target.value})} /></div>
-             <Button variant="outline" className="rounded-xl h-10 mt-auto font-bold border-gray-200 text-gray-500 uppercase text-[10px]" onClick={() => { setDateFilter({start:'', end:''}); setSearchTerm(''); }}>Limpiar filtros</Button>
+             <Button variant="outline" className="rounded-xl h-10 mt-auto font-bold uppercase text-[10px]" onClick={() => { setDateFilter({start:'', end:''}); setSearchTerm(''); }}>Limpiar</Button>
           </div>
           <div className="flex gap-3 w-full md:w-auto">
-             <div className="px-4 py-3 bg-red-50/50 rounded-2xl border border-red-50 text-center"><p className="text-[9px] font-black uppercase text-red-400 tracking-widest">Pendiente ARS</p><p className="text-lg font-black text-red-600">${summary.pendingARS.toLocaleString('es-AR')}</p></div>
-             <div className="px-4 py-3 bg-indigo-50/50 rounded-2xl border border-indigo-50 text-center"><p className="text-[9px] font-black uppercase text-indigo-400 tracking-widest">Pendiente USD</p><p className="text-lg font-black text-indigo-600">US${summary.pendingUSD.toLocaleString('es-AR')}</p></div>
+             <div className="px-4 py-3 bg-red-50/50 rounded-2xl border border-red-50 text-center"><p className="text-[9px] font-black uppercase text-red-400">Saldo ARS</p><p className="text-lg font-black text-red-600">${summary.pendingARS.toLocaleString('es-AR')}</p></div>
+             <div className="px-4 py-3 bg-indigo-50/50 rounded-2xl border border-indigo-50 text-center"><p className="text-[9px] font-black uppercase text-indigo-400">Saldo USD</p><p className="text-lg font-black text-indigo-600">US${summary.pendingUSD.toLocaleString('es-AR')}</p></div>
           </div>
         </CardContent>
       </Card>
 
       <div className="space-y-4">
         {loading ? (
-          <div className="flex flex-col items-center justify-center p-20 text-indigo-500"><Loader2 className="w-10 h-10 animate-spin mb-4" /><p className="font-bold uppercase text-[10px] tracking-widest">Cargando...</p></div>
+          <div className="flex flex-col items-center justify-center p-20 text-indigo-500"><Loader2 className="w-10 h-10 animate-spin mb-4" /><p className="font-bold uppercase text-[10px]">Cargando...</p></div>
         ) : orders.length === 0 ? (
           <div className="text-center p-20 bg-white rounded-3xl border border-dashed border-gray-200 text-gray-400 flex flex-col items-center"><Package className="w-12 h-12 mb-4 opacity-20" /><p className="font-medium italic">Sin registros.</p></div>
         ) : (
-          <>
-            {orders.map((order) => {
-              const symbol = order.currency === 'USD' ? 'US$' : '$';
-              return (
-                <motion.div key={order.id} initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="bg-white rounded-3xl p-6 shadow-sm border border-gray-100 hover:border-indigo-100 transition-all group">
-                  <div className="flex flex-col md:flex-row justify-between gap-6">
-                    <div className="flex-1 space-y-3">
-                      <div className="flex items-center gap-3"><h3 className="text-xl font-black text-gray-900 group-hover:text-indigo-600 transition-colors">{order.client_name}</h3><span className={`px-3 py-1 rounded-full text-[10px] font-black uppercase ${getStatusColor(order.status)}`}>{order.status}</span></div>
-                      {order.notes && (<div className="flex items-start gap-2 bg-gray-50 p-2 rounded-lg border border-gray-100 max-md"><StickyNote className="w-3.5 h-3.5 text-amber-500 mt-1 shrink-0" /><p className="text-xs text-gray-600 line-clamp-2 italic">{order.notes}</p></div>)}
-                      
-                      <div className="flex flex-col gap-1.5 mt-1 border-l-2 border-indigo-50 pl-3">
-                        {([...(order.products || []), ...(order.custom_products || [])]).map((p, idx) => (
-                          <div key={idx} className="flex items-center gap-2 text-gray-700 text-[13px] font-medium leading-tight">
-                            <span className="font-black text-indigo-400">{p.quantity}x</span>
-                            <span className="truncate max-w-[300px]">{p.name}</span>
-                            <span className="text-gray-400 font-normal text-[11px] whitespace-nowrap">({formatCurrency(p.price)})</span>
-                          </div>
-                        ))}
-                      </div>
-
-                      <div className="flex items-center gap-2 text-[10px] text-gray-400 font-bold uppercase tracking-widest"><Calendar className="w-3.5 h-3.5" />{formatDateTime(order.order_date).split(',')[0]}</div>
-                    </div>
+          orders.map((order) => {
+            const symbol = order.currency === 'USD' ? 'US$' : '$';
+            return (
+              <motion.div key={order.id} initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="bg-white rounded-3xl p-6 shadow-sm border border-gray-100 hover:border-indigo-100 transition-all group">
+                <div className="flex flex-col md:flex-row justify-between gap-6">
+                  <div className="flex-1 space-y-3">
+                    <div className="flex items-center gap-3"><h3 className="text-xl font-black text-gray-900 group-hover:text-indigo-600 transition-colors">{order.client_name}</h3><span className={`px-3 py-1 rounded-full text-[10px] font-black uppercase ${getStatusColor(order.status)}`}>{order.status}</span></div>
+                    {order.notes && (<div className="flex items-start gap-2 bg-gray-50 p-2 rounded-lg border border-gray-100"><StickyNote className="w-3.5 h-3.5 text-amber-500 mt-1 shrink-0" /><p className="text-xs text-gray-600 line-clamp-2 italic">{order.notes}</p></div>)}
                     
-                    <div className="flex flex-col md:items-end justify-between gap-4">
-                      <div className="text-right space-y-1">
-                        <div className="flex flex-col items-end leading-tight mb-2"><span className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">TOTAL</span><span className="text-4xl font-black text-gray-900 tracking-tighter">{symbol}{Number(order.total_amount).toLocaleString('es-AR')}</span></div>
-                        <div className="flex gap-4 justify-end items-center text-[11px] font-bold uppercase tracking-widest">
-                            <div className="flex gap-1.5 items-center"><span className="text-green-600 opacity-60">ABONADO</span><span className="text-green-600 text-sm font-black">{symbol}{Number(order.paid_amount).toLocaleString('es-AR')}</span></div>
-                            <div className="flex gap-1.5 items-center"><span className="text-red-600 opacity-60">SALDO</span><span className="text-red-600 text-sm font-black">{symbol}{Number(order.pending_amount).toLocaleString('es-AR')}</span></div>
+                    <div className="flex flex-col gap-1.5 mt-1 border-l-2 border-indigo-50 pl-3">
+                      {([...(order.products || []), ...(order.custom_products || [])]).map((p, idx) => (
+                        <div key={idx} className="flex items-center gap-2 text-gray-700 text-[13px] font-medium leading-tight">
+                          <span className="font-black text-indigo-400">{p.quantity}x</span>
+                          <span className="truncate max-w-[300px]">{p.name}</span>
+                          <span className="text-gray-400 font-normal text-[11px]">({formatCurrency(p.price)})</span>
                         </div>
+                      ))}
+                    </div>
+
+                    <div className="flex items-center gap-2 text-[10px] text-gray-400 font-bold uppercase tracking-widest"><Calendar className="w-3.5 h-3.5" />{formatDateTime(order.order_date).split(',')[0]}</div>
+                  </div>
+                  
+                  <div className="flex flex-col md:items-end justify-between gap-4">
+                    <div className="text-right space-y-1">
+                      <div className="flex flex-col items-end leading-tight mb-2"><span className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">TOTAL</span><span className="text-4xl font-black text-gray-900 tracking-tighter">{symbol}{Number(order.total_amount).toLocaleString('es-AR')}</span></div>
+                      <div className="flex gap-4 justify-end items-center text-[11px] font-bold uppercase tracking-widest">
+                          <div className="flex gap-1.5 items-center"><span className="text-green-600 opacity-60">ABONADO</span><span className="text-green-600 text-sm font-black">{symbol}{Number(order.paid_amount).toLocaleString('es-AR')}</span></div>
+                          <div className="flex gap-1.5 items-center"><span className="text-red-600 opacity-60">SALDO</span><span className="text-red-600 text-sm font-black">{symbol}{Number(order.pending_amount).toLocaleString('es-AR')}</span></div>
                       </div>
-                      <div className="flex gap-2">
-                        <Button size="sm" variant="ghost" className="rounded-xl hover:bg-green-50 font-bold" onClick={() => generatePDF(order)}><FileText className="w-4 h-4 mr-2" /> PDF</Button>
-                        <Button size="sm" variant="ghost" className="rounded-xl hover:bg-indigo-50 font-bold" onClick={() => handleShowDetails(order)}><Eye className="w-4 h-4 mr-2" /> Detalle</Button>
-                        <Button size="sm" variant="ghost" className="rounded-xl hover:bg-yellow-50 font-bold" onClick={() => handleEditOrder(order)}><Edit className="w-4 h-4 mr-2" /> Editar</Button>
-                        <Button 
-                          size="sm" 
-                          variant="ghost" 
-                          className="rounded-xl hover:bg-red-50 text-red-600 font-bold" 
-                          onClick={async () => { 
-                            if(confirm("¿Estás seguro de eliminar este pedido?")) {
+                    </div>
+                    <div className="flex gap-2">
+                      <Button size="sm" variant="ghost" className="rounded-xl hover:bg-green-50 font-bold" onClick={() => generatePDF(order)} disabled={!online}><FileText className="w-4 h-4 mr-2" /> PDF</Button>
+                      <Button size="sm" variant="ghost" className="rounded-xl hover:bg-indigo-50 font-bold" onClick={() => handleShowDetails(order)}><Eye className="w-4 h-4 mr-2" /> Detalle</Button>
+                      <Button size="sm" variant="ghost" className="rounded-xl hover:bg-yellow-50 font-bold" onClick={() => handleEditOrder(order)}><Edit className="w-4 h-4 mr-2" /> Editar</Button>
+                      <Button size="sm" variant="ghost" className="rounded-xl hover:bg-red-50 text-red-600 font-bold" 
+                        onClick={async () => { 
+                          if (!confirm("¿Eliminar pedido?")) return;
+                          try {
+                            if (!online) {
+                              await deleteLocalOrder(order.id);
+                              if (!String(order.id).startsWith("local-")) await enqueueAction({ type: "order:delete", payload: { id: order.id } });
+                            } else {
                               const { error } = await supabase.from('orders').delete().eq('id', order.id);
-                              if (error) { toast({ title: "Error al eliminar", variant: "destructive" }); }
-                              else { toast({ title: "Pedido eliminado correctamente" }); fetchOrders(); fetchSummary(); }
-                            } 
-                          }}
-                        >
-                          <Trash2 className="w-4 h-4" />
-                        </Button>
-                      </div>
+                              if (error) throw error;
+                            }
+                            toast({ title: "Pedido eliminado" }); fetchOrders(); fetchSummary();
+                          } catch (e) { toast({ title: "Error", variant: "destructive" }); }
+                        }}><Trash2 className="w-4 h-4" />
+                      </Button>
                     </div>
                   </div>
-                </motion.div>
-              );
-            })}
-          </>
+                </div>
+              </motion.div>
+            );
+          })
         )}
       </div>
 
@@ -439,7 +521,7 @@ const OrdersPage = () => {
               </div>
             </div>
           )}
-          <DialogFooter><Button className="w-full bg-green-700 hover:bg-green-800 text-white rounded-xl h-12 font-bold shadow-md" onClick={() => generatePDF(selectedOrder)}><FileText className="w-4 h-4 mr-2" /> Abrir PDF</Button></DialogFooter>
+          <DialogFooter><Button className="w-full bg-green-700 hover:bg-green-800 text-white rounded-xl h-12 font-bold shadow-md" onClick={() => generatePDF(selectedOrder)} disabled={!online}><FileText className="w-4 h-4 mr-2" /> {online ? 'Abrir PDF' : 'Modo Offline'}</Button></DialogFooter>
         </DialogContent>
       </Dialog>
     </div>

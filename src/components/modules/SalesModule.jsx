@@ -7,16 +7,46 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
   Search, ShoppingCart, Trash2, Plus, Minus,
-  Loader2, Tag, ChevronLeft, ChevronRight, Edit3, User, FileText
+  Loader2, Tag, ChevronLeft, ChevronRight, Edit3, User
 } from 'lucide-react';
 import { supabase } from '@/lib/customSupabaseClient';
 import { toast } from '@/components/ui/use-toast';
 import { formatCurrency, formatDateTime } from '@/lib/utils';
 
+// Offline Imports
+import {
+  cacheProducts,
+  cacheCategories,
+  cachePaymentMethods,
+  cacheBranches,
+  getProductsByBranch,
+  getCategoriesByBranch,
+  getPaymentMethodsByBranch,
+  getBranchById,
+  enqueueAction,
+  saveLocalSale,
+  decrementLocalStock,
+} from "@/lib/offlineDb";
+import { useOffline } from "@/contexts/OfflineContext";
+
+// --- HELPERS ---
+const getDiscountPercent = (m) => {
+  const raw =
+    m?.discount_percentage ??
+    m?.discount_percent ??
+    m?.discountPercent ??
+    m?.discount ??
+    0;
+
+  const n = Number(raw);
+  return Number.isFinite(n) ? n : 0;
+};
+
 const SalesModule = () => {
   const { branchId } = useParams();
+  const { online, refreshPending } = useOffline();
+  
   const [activeTab, setActiveTab] = useState("new-sale");
-
   const [products, setProducts] = useState([]);
   const [categories, setCategories] = useState([]);
   const [paymentMethods, setPaymentMethods] = useState([]);
@@ -38,39 +68,130 @@ const SalesModule = () => {
   const [isProcessing, setIsProcessing] = useState(false);
   const [branchDetails, setBranchDetails] = useState({ name: '', logo_url: '', address: '', tel: '' });
 
+  // --- FETCHERS CON LOGICA OFFLINE ---
+
+  const fetchCategories = async () => {
+    try {
+      if (online) {
+        const { data, error } = await supabase
+          .from("categories")
+          .select("*")
+          .eq("branch_id", branchId)
+          .order("name");
+
+        if (error) throw error;
+        setCategories(data || []);
+        await cacheCategories(data || []);
+      } else {
+        const cached = await getCategoriesByBranch(branchId);
+        setCategories(cached || []);
+      }
+    } catch {
+      const cached = await getCategoriesByBranch(branchId);
+      setCategories(cached || []);
+    }
+  };
+
+  const fetchPaymentMethods = async () => {
+    try {
+      if (online) {
+        const { data, error } = await supabase
+          .from("payment_methods")
+          .select("*")
+          .eq("branch_id", branchId)
+          .eq("is_active", true)
+          .order("name", { ascending: true });
+
+        if (error) throw error;
+
+        setPaymentMethods(data || []);
+        setSelectedPaymentMethod((data && data[0]) || null);
+        await cachePaymentMethods(data || []);
+      } else {
+        const cached = await getPaymentMethodsByBranch(branchId);
+        setPaymentMethods(cached || []);
+        setSelectedPaymentMethod((cached && cached[0]) || null);
+      }
+    } catch {
+      const cached = await getPaymentMethodsByBranch(branchId);
+      setPaymentMethods(cached || []);
+      setSelectedPaymentMethod((cached && cached[0]) || null);
+    }
+  };
+
+  const fetchBranchDetails = async () => {
+    try {
+      if (online) {
+        const { data, error } = await supabase
+          .from("branches")
+          .select("id, name, logo_url, address, tel")
+          .eq("id", branchId)
+          .single();
+
+        if (error) throw error;
+        if (data) {
+          setBranchDetails(data);
+          await cacheBranches([data]);
+        }
+      } else {
+        const cached = await getBranchById(branchId);
+        if (cached) setBranchDetails(cached);
+      }
+    } catch {
+      const cached = await getBranchById(branchId);
+      if (cached) setBranchDetails(cached);
+    }
+  };
+
   const fetchProducts = useCallback(async () => {
     if (!branchId) return;
     try {
       setLoading(true);
-      const from = (currentPage - 1) * itemsPerPage;
-      const to = from + itemsPerPage - 1;
+      if (online) {
+        const from = (currentPage - 1) * itemsPerPage;
+        const to = from + itemsPerPage - 1;
 
-      let query = supabase
-        .from('products')
-        .select('*, categories(name)', { count: 'exact' })
-        .eq('branch_id', branchId)
-        .order('name', { ascending: true })
-        .range(from, to);
+        let query = supabase
+          .from("products")
+          .select("*, categories(name)", { count: "exact" })
+          .eq("branch_id", branchId)
+          .order("name", { ascending: true })
+          .range(from, to);
 
-      if (searchTerm) {
-        query = query.ilike('name', `%${searchTerm}%`);
+        if (searchTerm) query = query.ilike("name", `%${searchTerm}%`);
+        if (selectedCategory !== "all") query = query.eq("category_id", selectedCategory);
+
+        const { data, count, error } = await query;
+        if (error) throw error;
+
+        setProducts(data || []);
+        setTotalCount(count || 0);
+        await cacheProducts(data || []);
+      } else {
+        let cached = await getProductsByBranch(branchId);
+        if (searchTerm) {
+          const s = searchTerm.toLowerCase();
+          cached = cached.filter(p => (p.name || "").toLowerCase().includes(s));
+        }
+        if (selectedCategory !== "all") {
+          cached = cached.filter(p => p.category_id === selectedCategory);
+        }
+        cached.sort((a, b) => (a.name || "").localeCompare(b.name || ""));
+        
+        const from = (currentPage - 1) * itemsPerPage;
+        const to = from + itemsPerPage;
+        setTotalCount(cached.length);
+        setProducts(cached.slice(from, to));
       }
-
-      if (selectedCategory !== 'all') {
-        query = query.eq('category_id', selectedCategory);
-      }
-
-      const { data, count, error } = await query;
-      if (error) throw error;
-
-      setProducts(data || []);
-      setTotalCount(count || 0);
-    } catch (error) {
+    } catch (e) {
       toast({ title: "Error cargando productos", variant: "destructive" });
+      const cached = await getProductsByBranch(branchId);
+      setProducts(cached.slice(0, itemsPerPage));
+      setTotalCount(cached.length);
     } finally {
       setLoading(false);
     }
-  }, [branchId, currentPage, searchTerm, selectedCategory]);
+  }, [branchId, currentPage, searchTerm, selectedCategory, online]);
 
   useEffect(() => {
     if (branchId) {
@@ -79,45 +200,21 @@ const SalesModule = () => {
       fetchPaymentMethods();
       fetchBranchDetails();
     }
-  }, [branchId, fetchProducts]);
+  }, [branchId, fetchProducts, online]);
 
   useEffect(() => { setCurrentPage(1); }, [searchTerm, selectedCategory]);
 
-  const fetchCategories = async () => {
-    const { data } = await supabase.from('categories').select('*').eq('branch_id', branchId).order('name');
-    if (data) setCategories(data);
-  };
-
-  const fetchBranchDetails = async () => {
-    const { data } = await supabase.from('branches').select('name, logo_url, address, tel').eq('id', branchId).single();
-    if (data) setBranchDetails(data);
-  };
-
-  const fetchPaymentMethods = async () => {
-    const { data } = await supabase
-      .from('payment_methods')
-      .select('*')
-      .eq('branch_id', branchId)
-      .eq('is_active', true)
-      .order('name', { ascending: true });
-
-    if (data && data.length > 0) {
-      setPaymentMethods(data);
-      setSelectedPaymentMethod(data[0]);
-    }
-  };
+  // --- PDF GENERATION ---
 
   const generateSalePDF = (sale, items) => {
     const element = document.createElement('div');
     element.innerHTML = `
       <div style="font-family: Arial, sans-serif; padding: 40px; color: #333; background: white; width: 750px; margin: 0 auto;">
-        
         <div style="text-align: center; margin-bottom: 40px;">
           ${branchDetails.logo_url ? `<img src="${branchDetails.logo_url}" style="max-height: 120px; display: block; margin: 0 auto 15px auto;" />` : ''}
           <h1 style="font-size: 32px; font-weight: 900; margin: 0; text-transform: uppercase;">${branchDetails.name || 'SUCURSAL'}</h1>
           <p style="font-size: 14px; color: #666; letter-spacing: 2px; margin-top: 10px; font-weight: bold;">COMPROBANTE DE COMPRA</p>
         </div>
-
         <div style="display: flex; justify-content: space-between; margin-bottom: 30px; font-size: 14px; border-bottom: 2px solid #f0f0f0; padding-bottom: 25px;">
           <div>
             <p style="margin: 5px 0;"><strong style="color: #555;">CLIENTE:</strong> ${sale.customer_name}</p>
@@ -128,7 +225,6 @@ const SalesModule = () => {
             <p style="margin: 5px 0;"><strong style="color: #555;">WHATSAPP:</strong> ${branchDetails.tel || 'No disponible'}</p>
           </div>
         </div>
-
         <table style="width: 100%; border-collapse: collapse; margin-bottom: 40px;">
           <thead>
             <tr>
@@ -149,13 +245,11 @@ const SalesModule = () => {
             `).join('')}
           </tbody>
         </table>
-
         <div style="display: flex; flex-direction: column; align-items: flex-end; gap: 10px; margin-top: 20px;">
           <div style="width: 250px; border-top: 4px solid #000; margin-top: 15px; padding-top: 15px; display: flex; justify-content: space-between; font-size: 20px; font-weight: 900; color: #000;">
             <span style="text-transform: uppercase;">TOTAL:</span> <span>$${Number(sale.total).toLocaleString('es-AR')}</span>
           </div>
         </div>
-
         <div style="margin-top: 80px; text-align: center; font-size: 18px; font-weight: 900; color: #000; text-transform: uppercase; letter-spacing: 1px;">
           Gracias por su compra
         </div>
@@ -181,6 +275,8 @@ const SalesModule = () => {
       }
     });
   };
+
+  // --- CART MANAGEMENT ---
 
   const addToCart = (product) => {
     if (product.stock <= 0) {
@@ -221,28 +317,23 @@ const SalesModule = () => {
   const removeFromCart = (productId) => setCart(prev => prev.filter(p => p.id !== productId));
 
   const handleQuantityChange = (productId, value, stock) => {
-  const newQty = parseInt(value, 10);
-  
-  // Si está vacío o no es un número, lo dejamos vacío temporalmente para permitir borrar y escribir
-  if (isNaN(newQty)) {
-    setCart(prev => prev.map(p => p.id === productId ? { ...p, quantity: "" } : p));
-    return;
-  }
-
-  // Validaciones de rango
-  if (newQty < 1) return;
-  if (newQty > stock) {
-    toast({ title: "Stock insuficiente", variant: "destructive" });
-    return;
-  }
-
-  setCart(prev => prev.map(p => p.id === productId ? { ...p, quantity: newQty } : p));
-};
+    const newQty = parseInt(value, 10);
+    if (isNaN(newQty)) {
+      setCart(prev => prev.map(p => p.id === productId ? { ...p, quantity: "" } : p));
+      return;
+    }
+    if (newQty < 1) return;
+    if (newQty > stock) {
+      toast({ title: "Stock insuficiente", variant: "destructive" });
+      return;
+    }
+    setCart(prev => prev.map(p => p.id === productId ? { ...p, quantity: newQty } : p));
+  };
 
   const updateQuantity = (productId, delta) => {
     setCart(prev => prev.map(p => {
       if (p.id === productId) {
-        const newQty = p.quantity + delta;
+        const newQty = (p.quantity || 0) + delta;
         if (newQty < 1 || newQty > p.stock) return p;
         return { ...p, quantity: newQty };
       }
@@ -250,64 +341,136 @@ const SalesModule = () => {
     }));
   };
 
-  const subtotal = cart.reduce((acc, item) => acc + (item.price * item.quantity), 0);
-  const discountPercent = selectedPaymentMethod ? Number(selectedPaymentMethod.discount_percentage || 0) : 0;
+  const subtotal = cart.reduce((acc, item) => acc + (item.price * (item.quantity || 0)), 0);
+  const discountPercent = getDiscountPercent(selectedPaymentMethod);
   const discountAmount = (subtotal * discountPercent) / 100;
   const total = subtotal - discountAmount;
 
+  // --- CHECKOUT LOGIC (ONLINE / OFFLINE) ---
+
   const handleCheckout = async () => {
     if (cart.length === 0 || !selectedPaymentMethod) return;
+
     setIsProcessing(true);
+
     try {
       const safeCustomerName = (customerName || "").trim() || "Cliente General";
 
-      const { data: sale, error: saleError } = await supabase
-        .from('sales')
-        .insert([{
+      // ---------- OFFLINE ----------
+      if (!online) {
+        const localSaleId = `local-${branchId}-${Date.now()}`;
+        
+        const discountPercentNow = getDiscountPercent(selectedPaymentMethod);
+        const discountAmountNow = (subtotal * discountPercentNow) / 100;
+        const totalNow = subtotal - discountAmountNow;
+
+        const localSale = {
+          id: localSaleId,
           branch_id: branchId,
           customer_name: safeCustomerName,
-          total: total,
-          payment_method: selectedPaymentMethod.name
-        }])
+          total: totalNow,
+          payment_method: selectedPaymentMethod.name,
+          created_at: new Date().toISOString(),
+          status: "pending_sync",
+        };
+
+        const localItems = cart.map((item) => ({
+          sale_id: localSaleId,
+          product_id: item.is_custom ? null : item.id,
+          name: item.name,
+          quantity: item.quantity,
+          price: item.price,
+          is_custom: item.is_custom,
+        }));
+
+        await saveLocalSale(localSale, localItems);
+
+        await enqueueAction({
+          type: "sale:create",
+          payload: {
+            branch_id: branchId,
+            customer_name: safeCustomerName,
+            total: totalNow,
+            payment_method: selectedPaymentMethod.name,
+            items: cart,
+            needsReceipt,
+          },
+        });
+
+        const stockPayload = cart
+          .filter((i) => !i.is_custom)
+          .map((i) => ({ product_id: i.id, quantity: i.quantity }));
+
+        if (stockPayload.length) {
+          await decrementLocalStock(stockPayload);
+        }
+
+        toast({ title: "Venta guardada (offline)", description: "Se sincronizará automáticamente al volver internet." });
+
+        if (needsReceipt === "yes") {
+          generateSalePDF(localSale, cart);
+        }
+
+        setCustomerName("");
+        setCart([]);
+        setNeedsReceipt('no');
+
+        await refreshPending();
+        await fetchProducts(); 
+        return;
+      }
+
+      // ---------- ONLINE ----------
+      const { data: sale, error: saleError } = await supabase
+        .from("sales")
+        .insert([
+          {
+            branch_id: branchId,
+            customer_name: safeCustomerName,
+            total,
+            payment_method: selectedPaymentMethod.name,
+          },
+        ])
         .select()
         .single();
 
       if (saleError) throw saleError;
 
-      const saleItems = cart.map(item => ({
+      const saleItems = cart.map((item) => ({
         sale_id: sale.id,
         product_id: item.is_custom ? null : item.id,
         product_name: item.name,
         quantity: item.quantity,
         unit_price: item.price,
-        is_custom: item.is_custom
+        is_custom: item.is_custom,
       }));
 
-      await supabase.from('sale_items').insert(saleItems);
+      const { error: itemsError } = await supabase.from("sale_items").insert(saleItems);
+      if (itemsError) throw itemsError;
 
-      const stockItemsToUpdate = cart.filter(i => !i.is_custom);
+      const stockItemsToUpdate = cart.filter((i) => !i.is_custom);
       if (stockItemsToUpdate.length > 0) {
-        const stockPayload = stockItemsToUpdate.map(i => ({
+        const stockPayload = stockItemsToUpdate.map((i) => ({
           product_id: i.id,
           quantity: i.quantity,
         }));
 
-        await supabase.rpc("apply_sale_stock", {
+        const { error: rpcError } = await supabase.rpc("apply_sale_stock", {
           p_branch_id: branchId,
           p_items: stockPayload,
         });
+        if (rpcError) throw rpcError;
       }
 
       toast({ title: "Venta realizada con éxito" });
 
-      if (needsReceipt === 'yes') {
-        generateSalePDF(sale, cart);
-      }
+      if (needsReceipt === "yes") generateSalePDF(sale, cart);
 
-      setCustomerName('');
+      setCustomerName("");
       setCart([]);
       setNeedsReceipt('no');
-      fetchProducts();
+
+      await fetchProducts();
     } catch (error) {
       toast({ title: "Error al procesar", variant: "destructive" });
     } finally {
@@ -321,7 +484,10 @@ const SalesModule = () => {
     <div className="min-h-screen lg:h-[calc(100vh-100px)] flex flex-col pb-20 lg:pb-0">
       <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full flex flex-col h-full min-h-0">
         <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4 mb-6 shrink-0 px-1">
-          <h2 className="text-2xl md:text-3xl font-bold tracking-tight text-gray-900">Punto de Venta</h2>
+          <div className="flex items-center gap-3">
+            <h2 className="text-2xl md:text-3xl font-bold tracking-tight text-gray-900">Punto de Venta</h2>
+            {!online && <span className="bg-amber-100 text-amber-700 text-[10px] px-2 py-1 rounded-full font-bold">MODO OFFLINE</span>}
+          </div>
           <TabsList className="grid w-full md:w-[400px] grid-cols-2 bg-gray-100">
             <TabsTrigger value="new-sale">Nueva Venta</TabsTrigger>
             <TabsTrigger value="history">Historial</TabsTrigger>
@@ -357,16 +523,9 @@ const SalesModule = () => {
                         <CardContent className="p-3 md:p-4">
                           <div className="flex justify-between items-start mb-2">
                             <div className="h-8 w-8 md:h-10 md:w-10 rounded-lg bg-indigo-50 flex items-center justify-center text-indigo-600 font-bold text-[10px] md:text-xs uppercase">{product.name.substring(0, 2)}</div>
-                            <span
-  className={`text-[10px] px-1.5 py-0.5 rounded-full font-medium ${
-    product.stock > 0
-      ? 'bg-green-100 text-green-700'
-      : 'bg-red-100 text-red-700'
-  }`}
->
-  Stock: {product.stock}
-</span>
-
+                            <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-medium ${product.stock > 0 ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>
+                              Stock: {product.stock}
+                            </span>
                           </div>
                           <h3 className="text-xs md:text-sm font-medium text-gray-900 line-clamp-2 h-8 md:h-10 mb-1">{product.name}</h3>
                           <p className="text-sm md:text-lg font-bold text-indigo-600">{formatCurrency(product.price)}</p>
@@ -425,33 +584,20 @@ const SalesModule = () => {
                         <div className="flex justify-between items-center">
                           <p className="text-xs text-indigo-600 font-bold">{formatCurrency(item.price)}</p>
                           <div className="flex items-center gap-1 bg-white rounded-md border border-gray-200 overflow-hidden">
-  <button 
-    onClick={() => updateQuantity(item.id, -1)} 
-    className="p-1.5 hover:bg-gray-100 border-r"
-  >
-    <Minus className="w-3 h-3" />
-  </button>
-  
-  <input
-    type="number"
-    value={item.quantity}
-    onChange={(e) => handleQuantityChange(item.id, e.target.value, item.stock)}
-    onBlur={() => {
-      // Si al salir del input está vacío, volvemos a 1
-      if (item.quantity === "" || item.quantity < 1) {
-        setCart(prev => prev.map(p => p.id === item.id ? { ...p, quantity: 1 } : p));
-      }
-    }}
-    className="w-10 text-center text-xs font-bold bg-transparent outline-none [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
-  />
-
-  <button 
-    onClick={() => updateQuantity(item.id, 1)} 
-    className="p-1.5 hover:bg-gray-100 border-l"
-  >
-    <Plus className="w-3 h-3" />
-  </button>
-</div>
+                            <button onClick={() => updateQuantity(item.id, -1)} className="p-1.5 hover:bg-gray-100 border-r"><Minus className="w-3 h-3" /></button>
+                            <input
+                              type="number"
+                              value={item.quantity}
+                              onChange={(e) => handleQuantityChange(item.id, e.target.value, item.stock)}
+                              onBlur={() => {
+                                if (item.quantity === "" || item.quantity < 1) {
+                                  setCart(prev => prev.map(p => p.id === item.id ? { ...p, quantity: 1 } : p));
+                                }
+                              }}
+                              className="w-10 text-center text-xs font-bold bg-transparent outline-none [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                            />
+                            <button onClick={() => updateQuantity(item.id, 1)} className="p-1.5 hover:bg-gray-100 border-l"><Plus className="w-3 h-3" /></button>
+                          </div>
                         </div>
                       </div>
                     ))
@@ -478,7 +624,11 @@ const SalesModule = () => {
                       {paymentMethods.map(method => (
                         <Button key={method.id} variant={selectedPaymentMethod?.id === method.id ? "default" : "outline"} onClick={() => setSelectedPaymentMethod(method)} className={`w-full text-[10px] h-auto py-2.5 flex flex-col border-gray-200 ${selectedPaymentMethod?.id === method.id ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-white hover:bg-indigo-50'}`}>
                           <span className="font-bold truncate w-full px-1">{method.name}</span>
-                          {Number(method.discount_percentage) > 0 && <span className="text-[9px] bg-green-500 text-white px-1.5 rounded-full">-{method.discount_percentage}%</span>}
+                          {getDiscountPercent(method) > 0 && (
+                            <span className="text-[9px] bg-green-500 text-white px-1.5 rounded-full">
+                              -{getDiscountPercent(method)}%
+                            </span>
+                          )}
                         </Button>
                       ))}
                     </div>

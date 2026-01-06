@@ -7,7 +7,18 @@ import { Input } from '@/components/ui/input';
 import { toast } from '@/components/ui/use-toast';
 import { formatCurrency, formatDateTime, getArgentinaDate } from '@/lib/utils';
 import { useAuth } from '@/contexts/AuthContext';
+import { useOffline } from "@/contexts/OfflineContext";
 import { supabase } from '@/lib/customSupabaseClient';
+import {
+  cacheBranchConfig,
+  getBranchConfigOffline,
+  upsertLocalCashRegister,
+  upsertLocalCashExpense,
+  deleteLocalCashExpense,
+  getCashDayOffline,
+  cacheSalesAndItems,
+  enqueueAction,
+} from "@/lib/offlineDb";
 import {
   Dialog,
   DialogContent,
@@ -19,6 +30,7 @@ import {
 const CashRegister = () => {
   const { branchId } = useParams();
   const { user } = useAuth();
+  const { online, syncing } = useOffline();
 
   const [loading, setLoading] = useState(true);
   const [registerData, setRegisterData] = useState(null);
@@ -30,155 +42,145 @@ const CashRegister = () => {
   const [isStartDialogOpen, setIsStartDialogOpen] = useState(false);
   const [isExpenseDialogOpen, setIsExpenseDialogOpen] = useState(false);
   const [openingBalance, setOpeningBalance] = useState(0);
-
   const [expenseForm, setExpenseForm] = useState({ amount: 0, description: '', isWithdrawal: false });
 
   const isOwner = user?.profile?.role === 'owner';
   const canViewHistory = isOwner || branchConfig?.allow_cash_history === true;
   const canDeleteExpense = isOwner || branchConfig?.allow_cash_expense_delete !== false;
-
   const debounceRef = useRef(null);
 
-  const getDayRange = (dateString) => {
-    return {
-      start: `${dateString}T00:00:00-03:00`,
-      end: `${dateString}T23:59:59.999-03:00`
-    };
-  };
+  const getDayRange = (dateString) => ({
+    start: `${dateString}T00:00:00-03:00`,
+    end: `${dateString}T23:59:59.999-03:00`
+  });
 
   const fetchRegisterData = useCallback(async () => {
     if (!branchId) return;
-
     setLoading(true);
     try {
       const { start, end } = getDayRange(selectedDate);
 
-      const { data: config, error: configError } = await supabase
-        .from('branches')
-        .select('allow_cash_history, allow_cash_expense_delete')
-        .eq('id', branchId)
-        .single();
-
-      if (configError) throw configError;
+      // 1. Configuración de sucursal
+      let config = null;
+      if (online) {
+        const { data } = await supabase.from('branches').select('allow_cash_history, allow_cash_expense_delete').eq('id', branchId).single();
+        if (data) { config = data; await cacheBranchConfig({ id: branchId, ...data }); }
+      } else {
+        config = await getBranchConfigOffline(branchId);
+      }
       setBranchConfig(config);
 
-      const { data: registers, error: regError } = await supabase
-        .from('cash_registers')
-        .select('*')
-        .eq('branch_id', branchId)
-        .gte('created_at', start)
-        .lte('created_at', end)
-        .order('created_at', { ascending: false });
+      // 2. Datos de Caja (Online -> Cache o Offline)
+      if (online) {
+        const { data: registers } = await supabase.from('cash_registers').select('*').eq('branch_id', branchId).gte('created_at', start).lte('created_at', end).order('created_at', { ascending: false });
+        const currentRegister = registers?.[0] || null;
+        setRegisterData(currentRegister);
 
-      if (regError) throw regError;
-
-      const currentRegister = registers && registers.length > 0 ? registers[0] : null;
-      setRegisterData(currentRegister);
-
-      if (currentRegister) {
-        const { data: sales, error: salesError } = await supabase
-          .from('sales')
-          .select('*, sale_items(product_name, quantity, unit_price)')
-          .eq('branch_id', branchId)
-          .ilike('payment_method', '%efectivo%')
-          .gte('created_at', start)
-          .lte('created_at', end)
-          .order('created_at', { ascending: false });
-
-        if (salesError) throw salesError;
-        setCashSales(sales || []);
-
-        const { data: exp, error: expError } = await supabase
-          .from('cash_expenses')
-          .select('*')
-          .eq('branch_id', branchId)
-          .gte('created_at', start)
-          .lte('created_at', end)
-          .order('created_at', { ascending: false });
-
-        if (expError) throw expError;
-        setExpenses(exp || []);
+        if (currentRegister) {
+          await upsertLocalCashRegister(currentRegister);
+          const { data: sales } = await supabase.from('sales').select('*, sale_items(*)').eq('branch_id', branchId).ilike('payment_method', '%efectivo%').gte('created_at', start).lte('created_at', end).order('created_at', { ascending: false });
+          const { data: exp } = await supabase.from('cash_expenses').select('*').eq('branch_id', branchId).gte('created_at', start).lte('created_at', end).order('created_at', { ascending: false });
+          
+          setCashSales(sales || []);
+          setExpenses(exp || []);
+          if (sales) await cacheSalesAndItems(sales);
+          if (exp) for (const e of exp) await upsertLocalCashExpense(e);
+        } else {
+          setCashSales([]); setExpenses([]);
+        }
       } else {
-        setCashSales([]);
-        setExpenses([]);
+        const offData = await getCashDayOffline({ branchId, date: selectedDate });
+        setRegisterData(offData.register);
+        setExpenses(offData.expenses);
+        setCashSales(offData.cashSales);
       }
-    } catch (error) {
-      console.error(error);
-    } finally {
-      setLoading(false);
-    }
-  }, [branchId, selectedDate]);
+    } catch (error) { console.error(error); } finally { setLoading(false); }
+  }, [branchId, selectedDate, online]);
 
+  useEffect(() => { fetchRegisterData(); }, [fetchRegisterData]);
+
+  // Listener para refrescar tras sincronización
   useEffect(() => {
-    fetchRegisterData();
+    const h = () => fetchRegisterData();
+    window.addEventListener("cash:refresh", h);
+    return () => window.removeEventListener("cash:refresh", h);
   }, [fetchRegisterData]);
 
   useEffect(() => {
-    if (!branchId) return;
+    if (!branchId || !online) return;
     const refreshDebounced = () => {
       if (debounceRef.current) clearTimeout(debounceRef.current);
-      debounceRef.current = setTimeout(() => {
-        fetchRegisterData();
-      }, 250);
+      debounceRef.current = setTimeout(() => fetchRegisterData(), 250);
     };
-
-    const ch = supabase.channel(`rt-cash-${branchId}-${selectedDate}`);
-    ch.on('postgres_changes', { event: '*', schema: 'public', table: 'cash_registers', filter: `branch_id=eq.${branchId}` }, () => refreshDebounced());
-    ch.on('postgres_changes', { event: '*', schema: 'public', table: 'cash_expenses', filter: `branch_id=eq.${branchId}` }, () => refreshDebounced());
-    ch.on('postgres_changes', { event: '*', schema: 'public', table: 'sales', filter: `branch_id=eq.${branchId}` }, () => refreshDebounced());
-    ch.subscribe();
-
-    return () => {
-      supabase.removeChannel(ch);
-      if (debounceRef.current) clearTimeout(debounceRef.current);
-    };
-  }, [branchId, selectedDate, fetchRegisterData]);
+    const ch = supabase.channel(`rt-cash-${branchId}`);
+    ch.on('postgres_changes', { event: '*', schema: 'public', table: 'cash_registers' }, refreshDebounced)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'cash_expenses' }, refreshDebounced)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'sales' }, refreshDebounced)
+      .subscribe();
+    return () => { supabase.removeChannel(ch); };
+  }, [branchId, online, fetchRegisterData]);
 
   const handleStartRegister = async () => {
     try {
-      const now = new Date();
-      const timeStr = now.toLocaleTimeString('es-AR', { hour12: false });
-      const timestamp = `${selectedDate}T${timeStr}-03:00`;
-      const { error } = await supabase.from('cash_registers').insert([{ branch_id: branchId, opening_balance: openingBalance, status: 'open', created_at: timestamp }]);
-      if (error) throw error;
-      setIsStartDialogOpen(false);
-      fetchRegisterData();
-    } catch (e) {
-      toast({ title: "Error", variant: "destructive" });
-    }
+      const timestamp = `${selectedDate}T${new Date().toLocaleTimeString('es-AR', { hour12: false })}-03:00`;
+      const payload = { branch_id: branchId, opening_balance: openingBalance, status: 'open', created_at: timestamp };
+
+      if (online) {
+        const { data, error } = await supabase.from('cash_registers').insert([payload]).select().single();
+        if (error) throw error;
+        await upsertLocalCashRegister(data);
+      } else {
+        const localId = `local-${crypto.randomUUID()}`;
+        await upsertLocalCashRegister({ id: localId, ...payload });
+        await enqueueAction({ type: "cash_register:create", payload: { ...payload, _local_id: localId } });
+        toast({ title: "Caja abierta (offline)" });
+      }
+      setIsStartDialogOpen(false); fetchRegisterData();
+    } catch (e) { toast({ title: "Error", variant: "destructive" }); }
   };
 
   const handleAddExpense = async () => {
-    if (expenseForm.amount <= 0 || !expenseForm.description) {
-      toast({ title: "Completa los campos", variant: "destructive" });
-      return;
-    }
+    if (expenseForm.amount <= 0 || !expenseForm.description) return toast({ title: "Completa los campos", variant: "destructive" });
     try {
-      const now = new Date();
-      const timeStr = now.toLocaleTimeString('es-AR', { hour12: false });
-      const timestamp = `${selectedDate}T${timeStr}-03:00`;
-      const { error: cashError } = await supabase.from('cash_expenses').insert([{ branch_id: branchId, amount: expenseForm.amount, description: expenseForm.isWithdrawal ? `RETIRO: ${expenseForm.description}` : expenseForm.description, created_at: timestamp }]);
-      if (cashError) throw cashError;
-      if (!expenseForm.isWithdrawal) {
-        const { error: expenseError } = await supabase.from('expenses').insert([{ branch_id: branchId, name: `[CAJA] ${expenseForm.description}`, amount: Number(expenseForm.amount), currency: 'ARS', payment_method: 'Efectivo', date: timestamp }]);
-        if (expenseError) throw expenseError;
+      const timestamp = `${selectedDate}T${new Date().toLocaleTimeString('es-AR', { hour12: false })}-03:00`;
+      const desc = expenseForm.isWithdrawal ? `RETIRO: ${expenseForm.description}` : expenseForm.description;
+      const payload = { branch_id: branchId, amount: expenseForm.amount, description: desc, created_at: timestamp };
+
+      if (online) {
+        const { data, error } = await supabase.from('cash_expenses').insert([payload]).select().single();
+        if (error) throw error;
+        await upsertLocalCashExpense(data);
+        if (!expenseForm.isWithdrawal) {
+          await supabase.from('expenses').insert([{ branch_id: branchId, name: `[CAJA] ${expenseForm.description}`, amount: Number(expenseForm.amount), currency: 'ARS', payment_method: 'Efectivo', date: timestamp }]);
+        }
+      } else {
+        const localId = `local-${crypto.randomUUID()}`;
+        await upsertLocalCashExpense({ id: localId, ...payload });
+        await enqueueAction({ type: "cash_expense:create", payload: { ...payload, _local_id: localId } });
+        if (!expenseForm.isWithdrawal) {
+          await enqueueAction({ type: "expense:create", payload: { branch_id: branchId, name: `[CAJA] ${expenseForm.description}`, amount: Number(expenseForm.amount), currency: 'ARS', payment_method: 'Efectivo', date: timestamp } });
+        }
+        toast({ title: "Registrado (offline)" });
       }
-      toast({ title: expenseForm.isWithdrawal ? "Retiro registrado" : "Gasto registrado" });
-      setIsExpenseDialogOpen(false);
-      setExpenseForm({ amount: 0, description: '', isWithdrawal: false });
-      fetchRegisterData();
-    } catch (e) {
-      toast({ title: "Error", variant: "destructive" });
-    }
+      setIsExpenseDialogOpen(false); setExpenseForm({ amount: 0, description: '', isWithdrawal: false }); fetchRegisterData();
+    } catch (e) { toast({ title: "Error", variant: "destructive" }); }
   };
 
   const handleDeleteExpense = async (id) => {
-    if (!isOwner && branchConfig?.allow_cash_expense_delete === false) {
-      toast({ title: "Acceso denegado", description: "No tienes permiso para eliminar egresos.", variant: "destructive" });
-      return;
+    if (!isOwner && branchConfig?.allow_cash_expense_delete === false) return toast({ title: "Acceso denegado", variant: "destructive" });
+    if (!window.confirm("¿Seguro?")) return;
+    
+    await deleteLocalCashExpense(id);
+    if (String(id).startsWith("local-")) {
+      fetchRegisterData(); return;
     }
-    if (!window.confirm("¿Seguro que desea eliminar este egreso?")) return;
-    await supabase.from('cash_expenses').delete().eq('id', id);
+
+    if (online) {
+      await supabase.from('cash_expenses').delete().eq('id', id);
+    } else {
+      await enqueueAction({ type: "cash_expense:delete", payload: { id } });
+      toast({ title: "Eliminado (offline)" });
+    }
     fetchRegisterData();
   };
 
@@ -234,10 +236,11 @@ const CashRegister = () => {
             </div>
           </div>
 
-          <Button onClick={() => setIsExpenseDialogOpen(true)} className="bg-red-600">
+          <Button onClick={() => setIsExpenseDialogOpen(true)} disabled={syncing} className="bg-red-600">
             <Plus className="w-4 h-4 mr-2 rotate-45" /> Registrar Egreso
           </Button>
 
+          {/* TABLA VENTAS */}
           <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden tabular-nums">
             <div className="p-4 border-b bg-gray-50/50 flex justify-between items-center">
               <h3 className="font-semibold text-green-600 text-sm uppercase tracking-wider">Ventas en Efectivo</h3>
@@ -262,24 +265,14 @@ const CashRegister = () => {
                     <span className="text-xl font-black text-green-600">+{formatCurrency(sale.total)}</span>
                   </div>
                   <div className="bg-gray-50/50 rounded-lg p-3 border border-gray-100 mt-2">
-                    <div className="flex items-center gap-1.5 mb-2 border-b border-gray-200/60 pb-1.5">
-                      <Package className="w-3.5 h-3.5 text-gray-400" />
-                      <span className="text-[10px] font-black uppercase text-gray-400 tracking-widest">Detalle de Venta</span>
-                    </div>
                     <div className="space-y-1.5">
                       {sale.sale_items?.map((item, idx) => (
                         <div key={idx} className="flex justify-between items-center text-sm">
                           <div className="flex items-center gap-2">
-                            <span className="bg-indigo-100 text-indigo-700 px-1.5 py-0.5 rounded text-[10px] font-bold">
-                              {item.quantity}x
-                            </span>
-                            <span className="text-gray-700 font-medium">
-                              {item.product_name || "Producto Personalizado"}
-                            </span>
+                            <span className="bg-indigo-100 text-indigo-700 px-1.5 py-0.5 rounded text-[10px] font-bold">{item.quantity}x</span>
+                            <span className="text-gray-700 font-medium">{item.product_name || "Producto Personalizado"}</span>
                           </div>
-                          <span className="text-gray-500 font-semibold text-xs italic">
-                            {formatCurrency(item.unit_price * item.quantity)}
-                          </span>
+                          <span className="text-gray-500 font-semibold text-xs italic">{formatCurrency(item.unit_price * item.quantity)}</span>
                         </div>
                       ))}
                     </div>
@@ -289,6 +282,7 @@ const CashRegister = () => {
             </div>
           </div>
 
+          {/* TABLA EGRESOS */}
           <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden tabular-nums">
             <div className="p-4 border-b bg-gray-50/50 flex justify-between items-center">
               <h3 className="font-semibold text-red-600 text-sm uppercase tracking-wider">Egresos de Caja</h3>
@@ -318,6 +312,7 @@ const CashRegister = () => {
         </div>
       )}
 
+      {/* DIALOGS */}
       <Dialog open={isStartDialogOpen} onOpenChange={setIsStartDialogOpen}>
         <DialogContent className="bg-white rounded-2xl">
           <DialogHeader><DialogTitle className="text-xl font-bold">Abrir Caja</DialogTitle></DialogHeader>
@@ -325,9 +320,7 @@ const CashRegister = () => {
             <label className="text-xs font-black uppercase text-gray-400">Monto Inicial</label>
             <Input type="number" value={openingBalance} onFocus={e => e.target.select()} onChange={(e) => setOpeningBalance(Number(e.target.value))} className="h-12 rounded-xl text-lg font-bold" />
           </div>
-          <DialogFooter>
-            <Button onClick={handleStartRegister} className="w-full h-12 bg-green-600 text-white font-black uppercase text-xs rounded-xl">Iniciar Jornada</Button>
-          </DialogFooter>
+          <DialogFooter><Button onClick={handleStartRegister} className="w-full h-12 bg-green-600 text-white font-black uppercase text-xs rounded-xl">Iniciar Jornada</Button></DialogFooter>
         </DialogContent>
       </Dialog>
 
@@ -339,30 +332,20 @@ const CashRegister = () => {
               <button onClick={() => setExpenseForm({ ...expenseForm, isWithdrawal: false })} className={`flex-1 py-2 text-xs font-bold rounded-lg transition-all ${!expenseForm.isWithdrawal ? 'bg-white text-indigo-600 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>GASTO</button>
               <button onClick={() => setExpenseForm({ ...expenseForm, isWithdrawal: true })} className={`flex-1 py-2 text-xs font-bold rounded-lg transition-all ${expenseForm.isWithdrawal ? 'bg-white text-amber-600 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>RETIRO</button>
             </div>
-
-            {/* TEXTO EXPLICATIVO SEGÚN SELECCIÓN */}
-            <div className={`p-3 rounded-xl border flex gap-3 items-start transition-colors ${expenseForm.isWithdrawal ? 'bg-amber-50 border-amber-100 text-amber-800' : 'bg-indigo-50 border-indigo-100 text-indigo-800'}`}>
+            <div className={`p-3 rounded-xl border flex gap-3 items-start ${expenseForm.isWithdrawal ? 'bg-amber-50 border-amber-100 text-amber-800' : 'bg-indigo-50 border-indigo-100 text-indigo-800'}`}>
               <Info className="w-5 h-5 mt-0.5 shrink-0" />
-              <p className="text-xs font-medium leading-relaxed">
-                {expenseForm.isWithdrawal 
-                  ? "Este retiro no se registrará como gasto, solo afectará el saldo de caja."
-                  : "Un gasto registra salidas de dinero para pagos de proveedores, servicios o insumos. Este movimiento afectará el reporte de la caja."
-                }
-              </p>
+              <p className="text-xs font-medium">{expenseForm.isWithdrawal ? "Este retiro no se registrará como gasto, solo afectará el saldo de caja." : "Este gasto afectará el reporte de caja y el módulo de gastos general."}</p>
             </div>
-
             <div className="space-y-1.5">
               <label className="text-xs font-black uppercase text-gray-400">Descripción</label>
-              <Input placeholder={expenseForm.isWithdrawal ? "Ej: Retiro para el banco" : "Ej: Pago de flete"} value={expenseForm.description} onChange={(e) => setExpenseForm({ ...expenseForm, description: e.target.value })} className="h-12 rounded-xl" />
+              <Input placeholder="Ej: Pago de flete" value={expenseForm.description} onChange={(e) => setExpenseForm({ ...expenseForm, description: e.target.value })} className="h-12 rounded-xl" />
             </div>
             <div className="space-y-1.5">
               <label className="text-xs font-black uppercase text-gray-400">Monto</label>
               <Input type="number" value={expenseForm.amount} onFocus={e => e.target.select()} onChange={(e) => setExpenseForm({ ...expenseForm, amount: Number(e.target.value) })} className="h-12 rounded-xl font-bold text-red-600" />
             </div>
           </div>
-          <DialogFooter>
-            <Button onClick={handleAddExpense} className={`w-full h-12 text-white font-black uppercase text-xs rounded-xl transition-colors ${expenseForm.isWithdrawal ? 'bg-amber-600 hover:bg-amber-700' : 'bg-red-600 hover:bg-red-700'}`}>Confirmar</Button>
-          </DialogFooter>
+          <DialogFooter><Button onClick={handleAddExpense} className={`w-full h-12 text-white font-black uppercase text-xs rounded-xl ${expenseForm.isWithdrawal ? 'bg-amber-600' : 'bg-red-600'}`}>Confirmar</Button></DialogFooter>
         </DialogContent>
       </Dialog>
     </motion.div>
