@@ -37,7 +37,6 @@ const Sidebar = ({ onClose }) => {
     const resolveAllowJornadas = async () => {
       if (!branchId) return;
 
-      // 1) Si estamos OFFLINE, leemos de IndexedDB
       if (!online) {
         try {
           const cfg = await getBranchConfigOffline(branchId);
@@ -52,7 +51,6 @@ const Sidebar = ({ onClose }) => {
         }
       }
 
-      // 2) Si estamos ONLINE, leemos de Supabase y cacheamos en IndexedDB
       try {
         const { data, error } = await supabase
           .from("branches")
@@ -61,18 +59,13 @@ const Sidebar = ({ onClose }) => {
           .single();
 
         if (error) throw error;
-
         if (!mounted) return;
 
         const allow = !!data?.allow_jornadas;
         setShowJornadas(allow);
-
-        // Cachear para offline (en tu store branch_config, keyPath: "id")
         await cacheBranchConfig({ id: branchId, allow_jornadas: allow });
       } catch (e) {
         console.warn("[Sidebar] supabase allow_jornadas failed, fallback to IDB:", e);
-
-        // fallback: si supabase falla (aunque online), intento IDB
         try {
           const cfg = await getBranchConfigOffline(branchId);
           if (!mounted) return;
@@ -87,13 +80,10 @@ const Sidebar = ({ onClose }) => {
 
     resolveAllowJornadas();
 
-    // Escuchar cambios en tiempo real desde Configuration page
     const handleConfigUpdate = async (e) => {
       if (e?.detail?.field === "allow_jornadas") {
         const val = !!e.detail.value;
         setShowJornadas(val);
-
-        // Guardar cache también (sirve para offline aunque lo cambies online)
         if (branchId) {
           try {
             await cacheBranchConfig({ id: branchId, allow_jornadas: val });
@@ -132,9 +122,9 @@ const Sidebar = ({ onClose }) => {
             { icon: Wallet, label: "Caja", path: "caja" },
           ];
 
+    // ✅ MODIFICACIÓN: Se agrega al final del todo
     if (showJornadas) {
-      const position = role === "owner" ? 6 : 4;
-      baseItems.splice(position, 0, { icon: Clock, label: "Jornadas", path: "jornadas" });
+      baseItems.push({ icon: Clock, label: "Jornadas", path: "jornadas" });
     }
 
     return baseItems;
