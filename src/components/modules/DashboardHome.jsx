@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useParams } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import {
-  TrendingUp, Users, DollarSign, ShoppingBag,
+  TrendingUp, DollarSign, ShoppingBag,
   Calendar as CalendarIcon, Clock, CreditCard,
   Trash2, ChevronLeft, ChevronRight
 } from 'lucide-react';
@@ -13,11 +13,14 @@ import { Button } from '@/components/ui/button';
 import { toast } from '@/components/ui/use-toast';
 
 const SalesTable = ({ sales, loading, onDelete, paymentMethods, page, setPage, hasMore }) => {
+  // Solo mostramos "Cargando" inicial si no hay datos. 
+  // Si ya hay datos y estamos cargando (paginando), mantenemos la tabla visible para mejor UX.
   if (loading && sales.length === 0) {
     return <div className="text-center p-10 text-lg text-gray-400 font-medium">Cargando ventas...</div>;
   }
 
-  if (!loading && sales.length === 0) {
+  // Corregido: Solo mostrar "No se encontraron ventas" si realmente la búsqueda total dio cero en la página 1.
+  if (!loading && sales.length === 0 && page === 0) {
     return (
       <div className="text-center p-12 bg-gray-50 rounded-xl border border-dashed border-gray-300 text-gray-500 text-lg">
         No se encontraron ventas para los filtros seleccionados.
@@ -27,7 +30,7 @@ const SalesTable = ({ sales, loading, onDelete, paymentMethods, page, setPage, h
 
   return (
     <div className="space-y-4">
-      <div className="bg-white rounded-2xl shadow-md border border-gray-200 overflow-hidden">
+      <div className={`bg-white rounded-2xl shadow-md border border-gray-200 overflow-hidden transition-opacity ${loading ? 'opacity-50' : 'opacity-100'}`}>
         <div className="overflow-x-auto">
           <table className="w-full text-left border-collapse">
             <thead className="bg-gray-100 border-b-2 border-gray-200 text-gray-700">
@@ -169,7 +172,10 @@ const DashboardHome = () => {
       const startDateTime = `${dateRange.start}T${timeRange.start}:00-03:00`;
       const endDateTime = `${dateRange.end}T${timeRange.end}:59-03:00`;
 
-      // 1. Consulta para la tabla (paginada)
+      // 1. Consulta para la tabla (paginada) - Pedimos pageSize + 1 para saber si hay más
+      const rangeStart = page * pageSize;
+      const rangeEnd = (page + 1) * pageSize; // Esto pide hasta el índice 20 (total 21 items)
+
       let salesQuery = supabase
         .from('sales')
         .select(`*, sale_items (product_id, quantity, product_name, unit_price)`)
@@ -177,7 +183,7 @@ const DashboardHome = () => {
         .gte('created_at', startDateTime)
         .lte('created_at', endDateTime)
         .order('created_at', { ascending: false })
-        .range(page * pageSize, (page + 1) * pageSize - 1);
+        .range(rangeStart, rangeEnd);
 
       // 2. Consulta para métricas (toda la data del periodo)
       let metricsQuery = supabase
@@ -197,12 +203,19 @@ const DashboardHome = () => {
       if (salesRes.error) throw salesRes.error;
       if (metricsRes.error) throw metricsRes.error;
 
-      // Actualizar tabla y paginación
+      // Lógica de Paginación Mejorada
       const rows = salesRes.data || [];
-      setSalesData(rows);
-      setHasMore(rows.length === pageSize);
+      if (rows.length > pageSize) {
+        // Hay una página siguiente
+        setHasMore(true);
+        setSalesData(rows.slice(0, pageSize)); // Guardamos solo los 20 para mostrar
+      } else {
+        // Es la última página
+        setHasMore(false);
+        setSalesData(rows);
+      }
 
-      // Calcular métricas sobre el total del periodo (no solo la página actual)
+      // Calcular métricas
       const allPeriodRows = metricsRes.data || [];
       const salesTotal = allPeriodRows.reduce((acc, sale) => acc + Number(sale.total), 0);
       const uniqueCustomers = new Set(allPeriodRows.map(s => s.customer_name)).size;
@@ -219,7 +232,7 @@ const DashboardHome = () => {
     } finally {
       setLoading(false);
     }
-  }, [branchId, dateRange.start, dateRange.end, timeRange.start, timeRange.end, selectedPaymentMethod, page]);
+  }, [branchId, dateRange.start, dateRange.end, timeRange.start, timeRange.end, selectedPaymentMethod, page, pageSize]);
 
   useEffect(() => {
     fetchDashboardData();
@@ -228,7 +241,7 @@ const DashboardHome = () => {
   // Resetear página al cambiar filtros
   useEffect(() => {
     setPage(0);
-  }, [dateRange, timeRange, selectedPaymentMethod]);
+  }, [dateRange.start, dateRange.end, timeRange.start, timeRange.end, selectedPaymentMethod]);
 
   useEffect(() => {
     if (!branchId) return;
@@ -352,26 +365,27 @@ const DashboardHome = () => {
         </div>
       </div>
 
-<div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-  {[
-    { title: "Ventas (Periodo)", value: formatCurrency(metrics.periodSales), desc: "Total facturado en rango", icon: DollarSign, color: "text-green-600" },
-    { title: "Transacciones", value: metrics.orderCount, desc: "Ventas realizadas", icon: ShoppingBag, color: "text-indigo-600" },
-    { title: "Promedio por Venta", value: formatCurrency(metrics.averageSale), desc: "Ticket promedio", icon: TrendingUp, color: "text-blue-600" }
-  ].map((item, i) => (
-    <motion.div key={i} initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.1 * (i + 1) }}>
-      <Card className="shadow-sm">
-        <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-          <CardTitle className="text-sm font-black uppercase tracking-wider text-gray-500">{item.title}</CardTitle>
-          <item.icon className={`h-5 w-5 ${item.color}`} />
-        </CardHeader>
-        <CardContent>
-          <div className="text-2xl font-black text-gray-900">{loading ? "..." : item.value}</div>
-          <p className="text-xs text-muted-foreground mt-1">{item.desc}</p>
-        </CardContent>
-      </Card>
-    </motion.div>
-  ))}
-</div>
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+        {[
+          { title: "Ventas (Periodo)", value: formatCurrency(metrics.periodSales), desc: "Total facturado en rango", icon: DollarSign, color: "text-green-600" },
+          { title: "Transacciones", value: metrics.orderCount, desc: "Ventas realizadas", icon: ShoppingBag, color: "text-indigo-600" },
+          { title: "Promedio por Venta", value: formatCurrency(metrics.averageSale), desc: "Ticket promedio", icon: TrendingUp, color: "text-blue-600" }
+        ].map((item, i) => (
+          <motion.div key={i} initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.1 * (i + 1) }}>
+            <Card className="shadow-sm">
+              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                <CardTitle className="text-sm font-black uppercase tracking-wider text-gray-500">{item.title}</CardTitle>
+                <item.icon className={`h-5 w-5 ${item.color}`} />
+              </CardHeader>
+              <CardContent>
+                <div className="text-2xl font-black text-gray-900">{loading && page === 0 ? "..." : item.value}</div>
+                <p className="text-xs text-muted-foreground mt-1">{item.desc}</p>
+              </CardContent>
+            </Card>
+          </motion.div>
+        ))}
+      </div>
+
       <SalesTable
         sales={salesData}
         loading={loading}
