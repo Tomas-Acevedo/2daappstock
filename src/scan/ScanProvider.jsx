@@ -2,6 +2,7 @@
 import React, { createContext, useCallback, useContext, useMemo, useState } from "react";
 import { supabase } from "@/lib/customSupabaseClient";
 import { useAuth } from "@/contexts/AuthContext";
+import { getProductsByBranch, initOfflineDb, enqueueAction } from "@/lib/offlineDb";
 
 const ScanCtx = createContext(null);
 
@@ -26,7 +27,7 @@ export default function ScanProvider({ children }) {
     setBarcode("");
     setMatches([]);
     setLoading(false);
-    setCart([]); // Limpieza obligatoria al cerrar manual
+    setCart([]);
   }, []);
 
   const openWithCode = useCallback(async (code) => {
@@ -38,17 +39,46 @@ export default function ScanProvider({ children }) {
     setIsOpen(true);
     try {
       const branchId = getBranchIdFromPath();
-      const { data } = await supabase.from("products").select("*").eq("branch_id", branchId).eq("barcode", cleanCode);
-      setMatches(data || []);
-    } catch (e) { console.error(e); } finally { setLoading(false); }
+      let data = [];
+
+      if (navigator.onLine) {
+        const res = await supabase.from("products").select("*").eq("branch_id", branchId).eq("barcode", cleanCode);
+        data = res.data || [];
+      } else {
+        // LÓGICA OFFLINE: Buscar en IndexedDB
+        const cachedProducts = await getProductsByBranch(branchId);
+        data = cachedProducts.filter(p => p.barcode === cleanCode);
+      }
+      setMatches(data);
+    } catch (e) { 
+      console.error(e); 
+    } finally { 
+      setLoading(false); 
+    }
   }, [user?.id]);
 
   const updateProductFields = useCallback(async (productId, updates) => {
     try {
-      const { data, error } = await supabase.from("products").update(updates).eq("id", productId).select().single();
-      if (error) throw error;
-      setMatches(prev => prev.map(p => p.id === productId ? data : p));
-      return { data, error: null };
+      if (navigator.onLine) {
+        const { data, error } = await supabase.from("products").update(updates).eq("id", productId).select().single();
+        if (error) throw error;
+        setMatches(prev => prev.map(p => p.id === productId ? data : p));
+        return { data, error: null };
+      } else {
+        // ACTUALIZACIÓN OFFLINE
+        const db = await initOfflineDb();
+        const product = await db.get("products", productId);
+        const updatedProduct = { ...product, ...updates };
+        await db.put("products", updatedProduct);
+        
+        await enqueueAction({
+          type: "product:update",
+          payload: { id: productId, ...updates }
+        });
+
+        setMatches(prev => prev.map(p => p.id === productId ? updatedProduct : p));
+        return { data: updatedProduct, error: null };
+      }
     } catch (e) { return { data: null, error: e }; }
   }, []);
 
@@ -62,7 +92,6 @@ export default function ScanProvider({ children }) {
     });
   }, []);
 
-  // ✅ NUEVA FUNCIÓN: Actualizar cantidad directamente en el carrito
   const updateCartQty = useCallback((productId, newQty) => {
     setCart(prev => prev.map(item => 
       item.id === productId ? { ...item, quantity: Math.max(1, newQty) } : item

@@ -1,4 +1,3 @@
-
 import React, { useState } from 'react';
 import { Routes, Route } from 'react-router-dom';
 import { AnimatePresence, motion } from 'framer-motion';
@@ -13,7 +12,8 @@ import LogsPage from '@/components/modules/LogsPage';
 import ExpensesPage from '@/components/modules/ExpensesPage';
 import SalesHistoryPage from '@/components/modules/SalesHistoryPage';
 import OrdersPage from '@/components/modules/OrdersPage';
-import ConfigurationPage from '@/components/modules/ConfigurationPage'; // Import ConfigurationPage
+import ConfigurationPage from '@/components/modules/ConfigurationPage';
+import JornadasPage from '@/components/modules/JornadasPage'; // ✅ Importación de la nueva página
 import ProtectedRoute from '@/components/ProtectedRoute';
 
 const BranchDashboard = () => {
@@ -68,6 +68,9 @@ const BranchDashboard = () => {
               <Route path="/caja" element={<CashRegister />} />
               <Route path="/reports" element={<ReportsModule />} />
               
+              {/* ✅ Nueva Ruta de Jornadas */}
+              <Route path="/jornadas" element={<JornadasPage />} />
+
               {/* Owner Only Routes */}
               <Route 
                 path="/logs" 

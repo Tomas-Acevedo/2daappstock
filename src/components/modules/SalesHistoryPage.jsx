@@ -136,9 +136,10 @@ const SalesHistoryPage = () => {
     try {
       if (online) {
         const { data, error } = await supabase
-          .from("payment_methods")
-          .select("id, name, is_active, branch_id")
-          .eq("branch_id", branchId);
+  .from("payment_methods")
+  .select("*") // ✅ importante: no recortar campos
+  .eq("branch_id", branchId);
+
         if (error) throw error;
         const active = (data || []).filter(m => m.is_active);
         setPaymentMethods(active);

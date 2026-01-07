@@ -7,7 +7,12 @@ const OfflineBanner = () => {
   if (online && pendingCount === 0 && !syncing) return null;
 
   return (
-    <div className="fixed top-3 left-1/2 -translate-x-1/2 z-[99999] w-[92%] max-w-xl">
+    /* CAMBIO CLAVE: 
+       - 'bottom-3' para mobile (se posiciona abajo)
+       - 'md:top-3' para tablets/desktop (se posiciona arriba)
+       - 'md:bottom-auto' para resetear la posición inferior en escritorio
+    */
+    <div className="fixed bottom-3 md:top-3 md:bottom-auto left-1/2 -translate-x-1/2 z-[99999] w-[92%] max-w-xl">
       <div
         className={`rounded-2xl border shadow-lg px-4 py-3 backdrop-blur-md ${
           online ? "bg-white/90 border-slate-200" : "bg-slate-900/90 border-white/10"

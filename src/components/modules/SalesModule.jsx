@@ -385,17 +385,27 @@ const SalesModule = () => {
 
         await saveLocalSale(localSale, localItems);
 
-        await enqueueAction({
-          type: "sale:create",
-          payload: {
-            branch_id: branchId,
-            customer_name: safeCustomerName,
-            total: totalNow,
-            payment_method: selectedPaymentMethod.name,
-            items: cart,
-            needsReceipt,
-          },
-        });
+        // Dentro de handleCheckout en SalesModule.jsx, cuando estás !online:
+
+await enqueueAction({
+  type: "sale:create",
+  payload: {
+    localSaleId: localSaleId,
+    branch_id: branchId,
+    customer_name: safeCustomerName,
+    total: totalNow,
+    payment_method: selectedPaymentMethod.name,
+    // Aseguramos que cada item lleve su nombre claramente
+    items: cart.map(item => ({
+      id: item.is_custom ? null : item.id,
+      name: item.name, // <--- Importante
+      quantity: item.quantity,
+      price: item.price,
+      is_custom: item.is_custom
+    })),
+    needsReceipt,
+  },
+});
 
         const stockPayload = cart
           .filter((i) => !i.is_custom)
@@ -622,10 +632,12 @@ const SalesModule = () => {
                     <label className="text-[10px] font-bold text-gray-500 uppercase tracking-wider">Método de Pago</label>
                     <div className="grid grid-cols-2 gap-2">
                       {paymentMethods.map(method => (
-                        <Button key={method.id} variant={selectedPaymentMethod?.id === method.id ? "default" : "outline"} onClick={() => setSelectedPaymentMethod(method)} className={`w-full text-[10px] h-auto py-2.5 flex flex-col border-gray-200 ${selectedPaymentMethod?.id === method.id ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-white hover:bg-indigo-50'}`}>
-                          <span className="font-bold truncate w-full px-1">{method.name}</span>
+                        <Button key={method.id} variant={selectedPaymentMethod?.id === method.id ? "default" : "outline"} onClick={() => setSelectedPaymentMethod(method)} className={`w-full text-[11px] h-auto py-2.5 flex flex-col border-gray-200 ${selectedPaymentMethod?.id === method.id ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-white hover:bg-indigo-50'}`}>
+                          <span className="font-bold w-full px-1 whitespace-normal break-words leading-tight">
+  {method.name}
+</span>
                           {getDiscountPercent(method) > 0 && (
-                            <span className="text-[9px] bg-green-500 text-white px-1.5 rounded-full">
+                            <span className="text-[10px] bg-green-500 text-white px-1.5 rounded-full">
                               -{getDiscountPercent(method)}%
                             </span>
                           )}

@@ -6,9 +6,14 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { toast } from "@/components/ui/use-toast";
-import { Search, Plus, Minus, Package, Loader2, CheckCircle2, Barcode, ShoppingCart, Trash2, Banknote, AlertTriangle, Edit3 } from 'lucide-react';
+import { Search, Plus, Minus, Package, Loader2, Barcode, ShoppingCart, Trash2, Banknote, Edit3 } from 'lucide-react';
 import { formatCurrency } from '@/lib/utils';
 import { useAuth } from "@/contexts/AuthContext";
+import { useOffline } from "@/contexts/OfflineContext";
+import { 
+  getProductsByBranch, getCategoriesByBranch, getPaymentMethodsByBranch, 
+  saveLocalSale, decrementLocalStock, enqueueAction, initOfflineDb 
+} from "@/lib/offlineDb";
 
 const getBranchIdFromPath = () => {
   try {
@@ -20,6 +25,7 @@ const getBranchIdFromPath = () => {
 
 export default function ScanDialog() {
   const { user } = useAuth();
+  const { online, refreshPending } = useOffline();
   const { 
     isOpen, close, barcode, loading, matches, openWithCode, 
     updateProductFields, cart, addToCart, removeFromCart, clearCart, updateCartQty 
@@ -76,15 +82,27 @@ export default function ScanDialog() {
   const fetchInitialData = async () => {
     setLoadingData(true);
     try {
-      const [prodsRes, catsRes, payRes] = await Promise.all([
-        supabase.from("products").select("*").eq("branch_id", branchId).order("name"),
-        supabase.from("categories").select("*").eq("branch_id", branchId).order("name"),
-        supabase.from('payment_methods').select('*').eq('branch_id', branchId).eq('is_active', true).order('name', { ascending: true })
-      ]);
-      setProducts(prodsRes.data || []);
-      setCategories(catsRes.data || []);
-      setPaymentMethods(payRes.data || []);
-      if (payRes.data?.length > 0) setSelectedPaymentMethod(payRes.data[0]);
+      if (online) {
+        const [prodsRes, catsRes, payRes] = await Promise.all([
+          supabase.from("products").select("*").eq("branch_id", branchId).order("name"),
+          supabase.from("categories").select("*").eq("branch_id", branchId).order("name"),
+          supabase.from('payment_methods').select('*').eq('branch_id', branchId).eq('is_active', true).order('name', { ascending: true })
+        ]);
+        setProducts(prodsRes.data || []);
+        setCategories(catsRes.data || []);
+        setPaymentMethods(payRes.data || []);
+        if (payRes.data?.length > 0) setSelectedPaymentMethod(payRes.data[0]);
+      } else {
+        const [p, c, pm] = await Promise.all([
+          getProductsByBranch(branchId),
+          getCategoriesByBranch(branchId),
+          getPaymentMethodsByBranch(branchId)
+        ]);
+        setProducts(p || []);
+        setCategories(c || []);
+        setPaymentMethods(pm || []);
+        if (pm?.length > 0) setSelectedPaymentMethod(pm[0]);
+      }
     } finally { setLoadingData(false); }
   };
 
@@ -125,57 +143,136 @@ export default function ScanDialog() {
     if (cart.length === 0 || !selectedPaymentMethod) return;
     setIsProcessing(true);
     try {
+      // 1. Verificación de Stock (Local)
       for (const item of cart) {
         if (!item.is_custom) {
-          const { data: currentProd } = await supabase.from('products').select('stock, name').eq('id', item.id).single();
-          if (!currentProd || currentProd.stock < item.quantity) {
-            toast({ title: "Stock insuficiente", description: `Producto: ${currentProd?.name}`, variant: "destructive" });
+          const prod = products.find(p => p.id === item.id);
+          if (!prod || prod.stock < item.quantity) {
+            toast({ title: "Stock insuficiente", description: `Producto: ${item.name}`, variant: "destructive" });
             setIsProcessing(false); return;
           }
         }
       }
 
-      const { data: sale, error: saleError } = await supabase.from('sales').insert([{
-        branch_id: branchId, customer_name: 'Cliente General', total: cartTotal, payment_method: selectedPaymentMethod.name, receipt_generated: false
-      }]).select().single();
+      if (!online) {
+        // --- PROCESO OFFLINE ---
+        const localSaleId = `local-scan-${Date.now()}`;
+        const localSale = {
+          id: localSaleId,
+          branch_id: branchId,
+          customer_name: 'Cliente General',
+          total: cartTotal,
+          payment_method: selectedPaymentMethod.name,
+          created_at: new Date().toISOString(),
+          status: "pending_sync"
+        };
 
-      if (saleError) throw saleError;
+        const localItems = cart.map(it => ({
+          sale_id: localSaleId,
+          product_id: it.is_custom ? null : it.id,
+          name: it.name,
+          quantity: it.quantity,
+          price: it.price,
+          is_custom: !!it.is_custom
+        }));
 
-      const saleItems = cart.map(item => ({
-        sale_id: sale.id, 
-        product_id: item.is_custom ? null : item.id, 
-        product_name: item.name, 
-        quantity: item.quantity, 
-        unit_price: item.price, 
-        is_custom: !!item.is_custom
-      }));
+        await saveLocalSale(localSale, localItems);
+        await enqueueAction({
+          type: "sale:create",
+          payload: { 
+            localSaleId, 
+            branch_id: branchId, 
+            customer_name: 'Cliente General', 
+            total: cartTotal, 
+            payment_method: selectedPaymentMethod.name,
+            items: cart.map(it => ({
+              id: it.is_custom ? null : it.id,
+              name: it.name,
+              quantity: it.quantity,
+              price: it.price,
+              is_custom: !!it.is_custom
+            }))
+          }
+        });
 
-      await supabase.from('sale_items').insert(saleItems);
+        const stockPayload = cart.filter(i => !i.is_custom).map(i => ({ product_id: i.id, quantity: i.quantity }));
+        if (stockPayload.length) await decrementLocalStock(stockPayload);
 
-      for (const item of cart) {
-        if (!item.is_custom) {
-          const { data: p } = await supabase.from('products').select('stock').eq('id', item.id).single();
-          await supabase.from('products').update({ stock: p.stock - item.quantity }).eq('id', item.id);
+        toast({ title: "Venta guardada offline" });
+        await refreshPending();
+      } else {
+        // --- PROCESO ONLINE ---
+        const { data: sale, error: saleError } = await supabase.from('sales').insert([{
+          branch_id: branchId, customer_name: 'Cliente General', total: cartTotal, payment_method: selectedPaymentMethod.name
+        }]).select().single();
+
+        if (saleError) throw saleError;
+
+        const saleItems = cart.map(item => ({
+          sale_id: sale.id, 
+          product_id: item.is_custom ? null : item.id, 
+          product_name: item.name, 
+          quantity: item.quantity, 
+          unit_price: item.price, 
+          is_custom: !!item.is_custom
+        }));
+
+        await supabase.from('sale_items').insert(saleItems);
+        
+        // Actualizar stock por RPC o loop
+        const stockItems = cart.filter(i => !i.is_custom);
+        for (const item of stockItems) {
+            const { data: p } = await supabase.from('products').select('stock').eq('id', item.id).single();
+            await supabase.from('products').update({ stock: p.stock - item.quantity }).eq('id', item.id);
         }
+        toast({ title: "Venta completada!" });
       }
 
-      toast({ title: "¡Venta completada!" });
       window.dispatchEvent(new Event('inventory:refresh'));
       clearCart();
       handleClose();
-    } catch (e) { toast({ title: "Error", variant: "destructive" }); } 
-    finally { setIsProcessing(false); }
+    } catch (e) { 
+      toast({ title: "Error al procesar", variant: "destructive" }); 
+    } finally { 
+      setIsProcessing(false); 
+    }
   };
 
   const createProductWithBarcode = async () => {
     if (!newName || !newCategoryId) return;
-    const { error } = await supabase.from("products").insert([{ name: newName, price: newPrice, stock: newStock, barcode, branch_id: branchId, category_id: newCategoryId }]);
-    if (!error) { window.dispatchEvent(new Event('inventory:refresh')); openWithCode(barcode); }
+    const payload = { 
+      name: newName, price: newPrice, stock: newStock, barcode, 
+      branch_id: branchId, category_id: newCategoryId 
+    };
+
+    if (!online) {
+      const localId = `local-prod-${Date.now()}`;
+      const db = await initOfflineDb();
+      await db.put("products", { id: localId, ...payload });
+      await enqueueAction({ type: "product:create", payload: { id: localId, ...payload } });
+      toast({ title: "Producto creado offline" });
+    } else {
+      const { error } = await supabase.from("products").insert([payload]);
+      if (error) { toast({title: "Error al crear", variant: "destructive"}); return; }
+    }
+    
+    window.dispatchEvent(new Event('inventory:refresh'));
+    openWithCode(barcode);
   };
 
   const associateBarcode = async (p) => {
-    const { error } = await supabase.from("products").update({ barcode }).eq("id", p.id);
-    if (!error) openWithCode(barcode); 
+    if (!online) {
+      const db = await initOfflineDb();
+      const product = await db.get("products", p.id);
+      const updated = { ...product, barcode };
+      await db.put("products", updated);
+      await enqueueAction({ type: "product:update", payload: { id: p.id, barcode } });
+      toast({ title: "Vínculo guardado offline" });
+    } else {
+      const { error } = await supabase.from("products").update({ barcode }).eq("id", p.id);
+      if (error) { toast({title: "Error al vincular", variant: "destructive"}); return; }
+    }
+    openWithCode(barcode); 
   };
 
   return (
@@ -187,7 +284,7 @@ export default function ScanDialog() {
           <div className="flex items-center gap-4">
             <div className="p-2 bg-indigo-600 rounded-xl shadow-md"><Barcode className="w-5 h-5 md:w-6 md:h-6 text-white" /></div>
             <div>
-              <h2 className="text-[10px] font-bold text-indigo-600 uppercase tracking-widest mb-0.5">Torre de Control</h2>
+              <h2 className="text-[10px] font-bold text-indigo-600 uppercase tracking-widest mb-0.5">Torre de Control {!online && "(OFFLINE)"}</h2>
               <p className="text-xl md:text-2xl font-black text-gray-900 tracking-tight">ESCANEADO: <span className="text-indigo-600 font-mono">{barcode}</span></p>
             </div>
           </div>
@@ -200,7 +297,6 @@ export default function ScanDialog() {
           ) : viewProduct || activeTab === "cart" ? (
             <div className="space-y-6">
               
-              {/* BLOQUE DE NAVEGACIÓN CORREGIDO: SE QUEDA EN SU LUGAR Y SUBE CON EL SCROLL */}
               <div className="flex justify-center pb-4">
                 <div className="flex justify-center gap-1 md:gap-2 bg-gray-100 p-1 rounded-2xl w-fit shadow-sm border border-gray-200/50">
                   <button onClick={() => setActiveTab("sale")} className={`px-4 md:px-6 py-2 rounded-xl text-[10px] md:text-xs font-black transition-all ${activeTab === "sale" ? "bg-white text-indigo-600 shadow-sm" : "text-gray-500"}`}>VENDER</button>
@@ -287,8 +383,8 @@ export default function ScanDialog() {
                         <div className="grid grid-cols-2 gap-2">
                           {paymentMethods.map(method => (
                             <Button key={method.id} variant={selectedPaymentMethod?.id === method.id ? "default" : "outline"} onClick={() => setSelectedPaymentMethod(method)} className={`h-auto py-2.5 px-3 flex justify-between items-center rounded-xl border-2 transition-all ${selectedPaymentMethod?.id === method.id ? 'bg-indigo-600 border-indigo-600 text-white shadow-md' : 'bg-white border-gray-100'}`}>
-                              <span className="font-bold text-[10px] truncate mr-1">{method.name}</span>
-                              {method.discount_percentage > 0 && <span className={`text-[8px] px-1 py-0.5 rounded-full font-black ${selectedPaymentMethod?.id === method.id ? 'bg-white text-indigo-600' : 'bg-green-100 text-green-600'}`}>-{method.discount_percentage}%</span>}
+                              <span className="font-bold text-[13px] leading-none whitespace-normal break-words mr-2 text-left">{method.name}</span>
+                              {method.discount_percentage > 0 && <span className={`text-[10px] px-1 py-0.5 rounded-full font-black ${selectedPaymentMethod?.id === method.id ? 'bg-white text-indigo-600' : 'bg-green-100 text-green-600'}`}>-{method.discount_percentage}%</span>}
                             </Button>
                           ))}
                         </div>
