@@ -102,7 +102,7 @@ const JornadasPage = () => {
         }
         const enriched = filtered.map((l) => ({
           ...l,
-          employees: { name: emps.find((e) => e.id === l.employee_id)?.name || "Empleado" },
+          employees: { name: emps.find((e) => e.id === l.employee_id)?.name || "Nombre" },
         }));
         enriched.sort((a, b) => String(b.clock_in || "").localeCompare(String(a.clock_in || "")));
         setLogs(enriched);
@@ -349,7 +349,7 @@ const JornadasPage = () => {
           <table className="w-full text-sm text-left">
             <thead className="bg-gray-50 text-gray-400 font-bold text-[10px] uppercase">
               <tr>
-                <th className="px-6 py-4">Empleado</th>
+                <th className="px-6 py-4">Nombre</th>
                 <th className="px-6 py-4 text-center">Fecha</th>
                 <th className="px-6 py-4 text-center">Entrada</th>
                 <th className="px-6 py-4 text-center">Salida</th>
@@ -392,7 +392,7 @@ const JornadasPage = () => {
           </DialogHeader>
           <div className="space-y-4 py-4">
             <div className="space-y-1">
-              <label className="text-[10px] font-black uppercase text-gray-400">Empleado</label>
+              <label className="text-[10px] font-black uppercase text-gray-400">Nombre</label>
               <select className="w-full border rounded-xl p-2.5 text-sm bg-gray-50 outline-none" value={formData.employee_id} onChange={(e) => setFormData({ ...formData, employee_id: e.target.value })}>
                 <option value="">Elegir...</option>
                 {employees.map((e) => <option key={e.id} value={e.id}>{e.name}</option>)}
