@@ -28,25 +28,26 @@ const OwnerDashboard = () => {
     fetchBranches();
   }, [user]);
 
-  const fetchBranches = async () => {
-    if (!user) return;
-    setIsLoadingBranches(true);
-    try {
-      const { data, error } = await supabase
-        .from('branches')
-        .select('*')
-        .eq('owner_id', user.id)
-        .order('created_at', { ascending: false });
-      
-      if (error) throw error;
-      setBranches(data || []);
-    } catch (error) {
-      console.error("Error fetching branches:", error);
-      toast({ title: "Error cargando sucursales", variant: "destructive" });
-    } finally {
-      setIsLoadingBranches(false);
-    }
-  };
+const fetchBranches = async () => {
+  if (!user) return;
+  setIsLoadingBranches(true);
+  try {
+    const { data, error } = await supabase
+      .from('branches')
+      .select('*')
+      .eq('owner_id', user.id)
+      .eq('is_visible', true) // <--- ESTA ES LA LÍNEA NUEVA
+      .order('created_at', { ascending: false });
+    
+    if (error) throw error;
+    setBranches(data || []);
+  } catch (error) {
+    console.error("Error fetching branches:", error);
+    toast({ title: "Error cargando sucursales", variant: "destructive" });
+  } finally {
+    setIsLoadingBranches(false);
+  }
+};
 
   const handleBranchCreated = () => {
     setIsNewBranchOpen(false);
