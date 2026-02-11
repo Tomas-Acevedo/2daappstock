@@ -5,13 +5,14 @@ import { LayoutGrid, Loader2, Lock, Mail } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useAuth } from "@/contexts/AuthContext";
 import { toast } from "@/components/ui/use-toast";
+import { supabase } from "@/lib/customSupabaseClient"; // Importamos supabase para la validación
 
 const LoginPage = () => {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [loadingUI, setLoadingUI] = useState(false);
 
-  const { login } = useAuth();
+  const { login, logout } = useAuth(); // Agregamos logout por si la sucursal está desactivada
   const navigate = useNavigate();
 
   const handleLogin = async (e) => {
@@ -19,23 +20,47 @@ const LoginPage = () => {
     setLoadingUI(true);
 
     try {
-      await login(email, password);
+      // 1. Intentamos el login normal
+      const { user } = await login(email, password);
+
+      // 2. Verificamos si este usuario pertenece a una sucursal desactivada
+      // Nota: Buscamos en la tabla 'branches' si el email logueado coincide con el de la sucursal
+      const { data: branch, error: branchError } = await supabase
+        .from('branches')
+        .select('is_visible')
+        .eq('email', email)
+        .single();
+
+      // 3. Si existe la sucursal y is_visible es false, bloqueamos el acceso
+      if (branch && branch.is_visible === false) {
+        await logout(); // Cerramos la sesión que se acaba de abrir
+        throw new Error("SUCURSAL_DESACTIVADA");
+      }
 
       toast({
         title: "¡Bienvenido!",
         description: "Has iniciado sesión correctamente.",
       });
 
-      // ✅ SIEMPRE vamos a una pantalla de redirección segura
+      // ✅ Redirección segura
       navigate("/post-login", { replace: true });
+
     } catch (error) {
       console.error("Login error:", error);
+      
+      let errorMessage = "Ocurrió un problema al intentar ingresar.";
+      let errorTitle = "Error al iniciar sesión";
+
+      if (error.message === "SUCURSAL_DESACTIVADA") {
+        errorTitle = "Acceso Denegado";
+        errorMessage = "Esta sucursal se encuentra temporalmente desactivada. Contacta al administrador.";
+      } else if (error.message === "Invalid login credentials") {
+        errorMessage = "Credenciales incorrectas. Verifica tu correo y contraseña.";
+      }
+
       toast({
-        title: "Error al iniciar sesión",
-        description:
-          error.message === "Invalid login credentials"
-            ? "Credenciales incorrectas. Verifica tu correo y contraseña."
-            : "Ocurrió un problema al intentar ingresar.",
+        title: errorTitle,
+        description: errorMessage,
         variant: "destructive",
       });
     } finally {
@@ -97,8 +122,6 @@ const LoginPage = () => {
           >
             {loadingUI ? <Loader2 className="w-5 h-5 animate-spin" /> : "Iniciar Sesión"}
           </Button>
-
-          
         </form>
       </motion.div>
     </div>
