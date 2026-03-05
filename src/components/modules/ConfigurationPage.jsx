@@ -3,7 +3,7 @@ import { useParams } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { 
   Plus, Trash2, Edit, CreditCard, ToggleLeft, 
-  ToggleRight, ShieldCheck, Loader2, Image as ImageIcon, Upload, Users, Clock
+  ToggleRight, ShieldCheck, Loader2, Image as ImageIcon, Users, Percent, Tag
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -28,7 +28,12 @@ const ConfigurationPage = () => {
   
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [editingMethod, setEditingMethod] = useState(null);
-  const [formData, setFormData] = useState({ name: '', discount_percentage: 0, is_active: true });
+  const [formData, setFormData] = useState({ 
+    name: '', 
+    discount_percentage: 0, 
+    installments: [], 
+    is_active: true 
+  });
 
   const [isEmpDialogOpen, setIsEmpDialogOpen] = useState(false);
   const [empName, setEmpName] = useState('');
@@ -79,45 +84,68 @@ const ConfigurationPage = () => {
     try {
       const { error } = await supabase.from('branches').update({ [field]: newValue }).eq('id', branchId);
       if (error) throw error;
-      
       setBranchData({ ...branchData, [field]: newValue });
-      
-      // NOTIFICAR AL SIDEBAR PARA ACTUALIZACIÓN EN TIEMPO REAL
-      window.dispatchEvent(new CustomEvent('branch-config-updated', { 
-        detail: { field, value: newValue } 
-      }));
-
+      window.dispatchEvent(new CustomEvent('branch-config-updated', { detail: { field, value: newValue } }));
       toast({ title: "Configuración actualizada" });
-    } catch (err) {
-      toast({ title: "Error al actualizar", variant: "destructive" });
-    }
+    } catch (err) { toast({ title: "Error al actualizar", variant: "destructive" }); }
+  };
+
+  const addInstallmentRow = () => {
+    setFormData({
+      ...formData,
+      installments: [...(formData.installments || []), { quantity: 1, adjustment: 0 }]
+    });
+  };
+
+  const removeInstallmentRow = (index) => {
+    const newInstallments = formData.installments.filter((_, i) => i !== index);
+    setFormData({ ...formData, installments: newInstallments });
+  };
+
+  const updateInstallment = (index, field, value) => {
+    const newInstallments = [...formData.installments];
+    newInstallments[index][field] = field === 'quantity' ? parseInt(value) : parseFloat(value);
+    setFormData({ ...formData, installments: newInstallments });
   };
 
   const handleSavePaymentMethod = async () => {
+    const payload = {
+      name: formData.name,
+      discount_percentage: formData.discount_percentage,
+      installments: formData.installments || [],
+      branch_id: branchId,
+      is_active: formData.is_active
+    };
+
     if (editingMethod) {
-      await supabase.from('payment_methods').update(formData).eq('id', editingMethod.id);
+      await supabase.from('payment_methods').update(payload).eq('id', editingMethod.id);
     } else {
-      await supabase.from('payment_methods').insert([{ ...formData, branch_id: branchId }]);
+      await supabase.from('payment_methods').insert([payload]);
     }
     setIsDialogOpen(false);
     fetchPaymentMethods();
-    toast({ title: "Guardado" });
+    toast({ title: "Método de pago guardado" });
   };
 
   const openMethodDialog = (method = null) => {
     if (method) {
       setEditingMethod(method);
-      setFormData({ name: method.name, discount_percentage: method.discount_percentage, is_active: method.is_active });
+      setFormData({ 
+        name: method.name, 
+        discount_percentage: method.discount_percentage || 0,
+        installments: method.installments || [], 
+        is_active: method.is_active 
+      });
     } else {
       setEditingMethod(null);
-      setFormData({ name: '', discount_percentage: 0, is_active: true });
+      setFormData({ name: '', discount_percentage: 0, installments: [], is_active: true });
     }
     setIsDialogOpen(true);
   };
 
   const handleAddEmployee = async () => {
     if (employees.length >= 3) {
-      toast({ title: "Límite alcanzado", description: "Máximo 3 empleados por sucursal", variant: "destructive" });
+      toast({ title: "Límite alcanzado", variant: "destructive" });
       return;
     }
     const { error } = await supabase.from('employees').insert([{ name: empName, branch_id: branchId }]);
@@ -207,12 +235,28 @@ const ConfigurationPage = () => {
         </div>
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
-            <thead className="bg-gray-50 text-gray-500 font-medium"><tr><th className="px-6 py-3 text-left">Nombre</th><th className="px-6 py-3 text-left">Descuento</th><th className="px-6 py-3 text-right">Acciones</th></tr></thead>
+            <thead className="bg-gray-50 text-gray-500 font-medium">
+              <tr>
+                <th className="px-6 py-3 text-left">Nombre</th>
+                <th className="px-6 py-3 text-left">Dcto. Global</th>
+                <th className="px-6 py-3 text-left">Cuotas configuradas</th>
+                <th className="px-6 py-3 text-right">Acciones</th>
+              </tr>
+            </thead>
             <tbody className="divide-y divide-gray-100">
               {paymentMethods.map(m => (
                 <tr key={m.id} className="hover:bg-gray-50/50 transition-colors">
                   <td className="px-6 py-4 font-medium text-gray-900">{m.name}</td>
                   <td className="px-6 py-4 text-green-600 font-bold">{m.discount_percentage}%</td>
+                  <td className="px-6 py-4">
+                    <div className="flex flex-wrap gap-1">
+                      {m.installments?.map((ins, idx) => (
+                        <span key={idx} className="text-[10px] bg-indigo-50 text-indigo-600 px-2 py-0.5 rounded border border-indigo-100">
+                          {ins.quantity} c. ({ins.adjustment > 0 ? '+' : ''}{ins.adjustment}%)
+                        </span>
+                      ))}
+                    </div>
+                  </td>
                   <td className="px-6 py-4 text-right">
                     <div className="flex justify-end gap-2">
                       <Button variant="ghost" size="icon" onClick={() => openMethodDialog(m)}><Edit className="w-4 h-4 text-gray-400" /></Button>
@@ -226,7 +270,7 @@ const ConfigurationPage = () => {
         </div>
       </div>
 
-      {/* Dialogs */}
+      {/* Dialog Nuevo Empleado */}
       <Dialog open={isEmpDialogOpen} onOpenChange={setIsEmpDialogOpen}>
         <DialogContent className="bg-white">
           <DialogHeader><DialogTitle>Nuevo Empleado</DialogTitle></DialogHeader>
@@ -237,14 +281,82 @@ const ConfigurationPage = () => {
         </DialogContent>
       </Dialog>
 
+      {/* Dialog Método de Pago + CUOTAS */}
       <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
-        <DialogContent className="bg-white">
+        <DialogContent className="bg-white max-w-md">
           <DialogHeader><DialogTitle>{editingMethod ? 'Editar' : 'Nuevo'} Método de Pago</DialogTitle></DialogHeader>
           <div className="space-y-4 py-4">
-            <div><label className="text-sm font-medium mb-1 block">Nombre</label><Input value={formData.name} onChange={(e) => setFormData({...formData, name: e.target.value})} placeholder="Transferencia..." /></div>
-            <div><label className="text-sm font-medium mb-1 block">Descuento (%)</label><Input type="number" value={formData.discount_percentage} onChange={(e) => setFormData({...formData, discount_percentage: Number(e.target.value)})} /></div>
+            <div>
+              <label className="text-xs font-bold text-gray-500 uppercase">Nombre del Método</label>
+              <Input value={formData.name} onChange={(e) => setFormData({...formData, name: e.target.value})} placeholder="Efectivo, Visa, Transferencia..." />
+            </div>
+
+            {/* Sistema Anterior: Descuento Global */}
+            <div>
+              <label className="text-xs font-bold text-gray-500 uppercase flex items-center gap-1">
+                <Tag className="w-3 h-3" /> Descuento Global (%)
+              </label>
+              <Input 
+                type="number" 
+                value={formData.discount_percentage} 
+                onChange={(e) => setFormData({...formData, discount_percentage: Number(e.target.value)})} 
+                placeholder="0"
+              />
+            </div>
+            
+            <div className="space-y-3">
+              <div className="flex justify-between items-center">
+                <label className="text-xs font-bold text-gray-500 uppercase">Configuración de Cuotas</label>
+                <Button type="button" size="sm" variant="outline" className="h-7 text-[10px]" onClick={addInstallmentRow}>
+                  <Plus className="w-3 h-3 mr-1" /> Añadir Cuota
+                </Button>
+              </div>
+
+              <div className="max-h-48 overflow-y-auto space-y-2 pr-2">
+                {(formData.installments || []).map((ins, index) => (
+                  <div key={index} className="flex items-center gap-2 bg-gray-50 p-2 rounded-lg border border-gray-100">
+                    <div className="flex-1">
+                      <p className="text-[10px] text-gray-400 font-bold mb-1">CUOTAS</p>
+                      <Input 
+                        type="number" 
+                        value={ins.quantity} 
+                        onChange={(e) => updateInstallment(index, 'quantity', e.target.value)} 
+                        className="h-8 text-xs"
+                      />
+                    </div>
+                    <div className="flex-1">
+                      <p className="text-[10px] text-gray-400 font-bold mb-1">RECARGO/DCTO (%)</p>
+                      <div className="relative">
+                        <Percent className="absolute right-2 top-1/2 -translate-y-1/2 w-3 h-3 text-gray-400" />
+                        <Input 
+                          type="number" 
+                          value={ins.adjustment} 
+                          onChange={(e) => updateInstallment(index, 'adjustment', e.target.value)} 
+                          className="h-8 text-xs pr-6"
+                        />
+                      </div>
+                    </div>
+                    <Button 
+                      variant="ghost" 
+                      size="icon" 
+                      className="mt-4 h-8 w-8 text-red-400" 
+                      onClick={() => removeInstallmentRow(index)}
+                    >
+                      <Trash2 className="w-4 h-4" />
+                    </Button>
+                  </div>
+                ))}
+                {(!formData.installments || formData.installments.length === 0) && (
+                  <p className="text-[10px] text-gray-400 text-center py-2">Sin cuotas específicas.</p>
+                )}
+              </div>
+              <p className="text-[10px] text-gray-400 italic"></p>
+            </div>
           </div>
-          <DialogFooter><Button variant="ghost" onClick={() => setIsDialogOpen(false)}>Cancelar</Button><Button onClick={handleSavePaymentMethod} className="bg-indigo-600 text-white">Guardar Cambios</Button></DialogFooter>
+          <DialogFooter>
+            <Button variant="ghost" onClick={() => setIsDialogOpen(false)}>Cancelar</Button>
+            <Button onClick={handleSavePaymentMethod} className="bg-indigo-600 text-white">Guardar Cambios</Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
     </motion.div>

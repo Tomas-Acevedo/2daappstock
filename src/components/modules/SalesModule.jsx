@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
   Search, ShoppingCart, Trash2, Plus, Minus,
-  Loader2, Tag, ChevronLeft, ChevronRight, Edit3, User
+  Loader2, Tag, ChevronLeft, ChevronRight, Edit3, User, CheckCircle2
 } from 'lucide-react';
 import { supabase } from '@/lib/customSupabaseClient';
 import { toast } from '@/components/ui/use-toast';
@@ -28,19 +28,6 @@ import {
   decrementLocalStock,
 } from "@/lib/offlineDb";
 import { useOffline } from "@/contexts/OfflineContext";
-
-// --- HELPERS ---
-const getDiscountPercent = (m) => {
-  const raw =
-    m?.discount_percentage ??
-    m?.discount_percent ??
-    m?.discountPercent ??
-    m?.discount ??
-    0;
-
-  const n = Number(raw);
-  return Number.isFinite(n) ? n : 0;
-};
 
 const SalesModule = () => {
   const { branchId } = useParams();
@@ -65,20 +52,16 @@ const SalesModule = () => {
 
   const [cart, setCart] = useState([]);
   const [selectedPaymentMethod, setSelectedPaymentMethod] = useState(null);
+  const [selectedInstallment, setSelectedInstallment] = useState(null);
   const [isProcessing, setIsProcessing] = useState(false);
   const [branchDetails, setBranchDetails] = useState({ name: '', logo_url: '', address: '', tel: '' });
 
-  // --- FETCHERS CON LOGICA OFFLINE ---
+  // --- FETCHERS ---
 
   const fetchCategories = async () => {
     try {
       if (online) {
-        const { data, error } = await supabase
-          .from("categories")
-          .select("*")
-          .eq("branch_id", branchId)
-          .order("name");
-
+        const { data, error } = await supabase.from("categories").select("*").eq("branch_id", branchId).order("name");
         if (error) throw error;
         setCategories(data || []);
         await cacheCategories(data || []);
@@ -94,40 +77,29 @@ const SalesModule = () => {
 
   const fetchPaymentMethods = async () => {
     try {
+      let methods = [];
       if (online) {
-        const { data, error } = await supabase
-          .from("payment_methods")
-          .select("*")
-          .eq("branch_id", branchId)
-          .eq("is_active", true)
-          .order("name", { ascending: true });
-
+        const { data, error } = await supabase.from("payment_methods").select("*").eq("branch_id", branchId).eq("is_active", true).order("name", { ascending: true });
         if (error) throw error;
-
-        setPaymentMethods(data || []);
-        setSelectedPaymentMethod((data && data[0]) || null);
-        await cachePaymentMethods(data || []);
+        methods = data || [];
+        await cachePaymentMethods(methods);
       } else {
-        const cached = await getPaymentMethodsByBranch(branchId);
-        setPaymentMethods(cached || []);
-        setSelectedPaymentMethod((cached && cached[0]) || null);
+        methods = await getPaymentMethodsByBranch(branchId);
+      }
+      setPaymentMethods(methods);
+      if (methods.length > 0) {
+        handleMethodSelection(methods[0]);
       }
     } catch {
       const cached = await getPaymentMethodsByBranch(branchId);
       setPaymentMethods(cached || []);
-      setSelectedPaymentMethod((cached && cached[0]) || null);
     }
   };
 
   const fetchBranchDetails = async () => {
     try {
       if (online) {
-        const { data, error } = await supabase
-          .from("branches")
-          .select("id, name, logo_url, address, tel")
-          .eq("id", branchId)
-          .single();
-
+        const { data, error } = await supabase.from("branches").select("id, name, logo_url, address, tel").eq("id", branchId).single();
         if (error) throw error;
         if (data) {
           setBranchDetails(data);
@@ -150,20 +122,11 @@ const SalesModule = () => {
       if (online) {
         const from = (currentPage - 1) * itemsPerPage;
         const to = from + itemsPerPage - 1;
-
-        let query = supabase
-          .from("products")
-          .select("*, categories(name)", { count: "exact" })
-          .eq("branch_id", branchId)
-          .order("name", { ascending: true })
-          .range(from, to);
-
+        let query = supabase.from("products").select("*, categories(name)", { count: "exact" }).eq("branch_id", branchId).order("name", { ascending: true }).range(from, to);
         if (searchTerm) query = query.ilike("name", `%${searchTerm}%`);
         if (selectedCategory !== "all") query = query.eq("category_id", selectedCategory);
-
         const { data, count, error } = await query;
         if (error) throw error;
-
         setProducts(data || []);
         setTotalCount(count || 0);
         await cacheProducts(data || []);
@@ -177,17 +140,12 @@ const SalesModule = () => {
           cached = cached.filter(p => p.category_id === selectedCategory);
         }
         cached.sort((a, b) => (a.name || "").localeCompare(b.name || ""));
-        
         const from = (currentPage - 1) * itemsPerPage;
-        const to = from + itemsPerPage;
         setTotalCount(cached.length);
-        setProducts(cached.slice(from, to));
+        setProducts(cached.slice(from, from + itemsPerPage));
       }
     } catch (e) {
       toast({ title: "Error cargando productos", variant: "destructive" });
-      const cached = await getProductsByBranch(branchId);
-      setProducts(cached.slice(0, itemsPerPage));
-      setTotalCount(cached.length);
     } finally {
       setLoading(false);
     }
@@ -204,80 +162,31 @@ const SalesModule = () => {
 
   useEffect(() => { setCurrentPage(1); }, [searchTerm, selectedCategory]);
 
-  // --- PDF GENERATION ---
-
-  const generateSalePDF = (sale, items) => {
-    const element = document.createElement('div');
-    element.innerHTML = `
-      <div style="font-family: Arial, sans-serif; padding: 40px; color: #333; background: white; width: 750px; margin: 0 auto;">
-        <div style="text-align: center; margin-bottom: 40px;">
-          ${branchDetails.logo_url ? `<img src="${branchDetails.logo_url}" style="max-height: 120px; display: block; margin: 0 auto 15px auto;" />` : ''}
-          <h1 style="font-size: 32px; font-weight: 900; margin: 0; text-transform: uppercase;">${branchDetails.name || 'SUCURSAL'}</h1>
-          <p style="font-size: 14px; color: #666; letter-spacing: 2px; margin-top: 10px; font-weight: bold;">COMPROBANTE DE COMPRA</p>
-        </div>
-        <div style="display: flex; justify-content: space-between; margin-bottom: 30px; font-size: 14px; border-bottom: 2px solid #f0f0f0; padding-bottom: 25px;">
-          <div>
-            <p style="margin: 5px 0;"><strong style="color: #555;">CLIENTE:</strong> ${sale.customer_name}</p>
-            <p style="margin: 5px 0;"><strong style="color: #555;">FECHA:</strong> ${formatDateTime(sale.created_at).split(',')[0]}</p>
-          </div>
-          <div style="text-align: right;">
-            <p style="margin: 5px 0;"><strong style="color: #555;">DIRECCIÓN:</strong> ${branchDetails.address || 'No disponible'}</p>
-            <p style="margin: 5px 0;"><strong style="color: #555;">WHATSAPP:</strong> ${branchDetails.tel || 'No disponible'}</p>
-          </div>
-        </div>
-        <table style="width: 100%; border-collapse: collapse; margin-bottom: 40px;">
-          <thead>
-            <tr>
-              <th style="text-align: left; padding: 10px 0; border-bottom: 2px solid #e2e8f0; font-size: 12px; color: #888; text-transform: uppercase;">DESCRIPCIÓN</th>
-              <th style="text-align: center; padding: 10px 0; border-bottom: 2px solid #e2e8f0; font-size: 12px; color: #888; text-transform: uppercase;">CANT.</th>
-              <th style="text-align: right; padding: 10px 0; border-bottom: 2px solid #e2e8f0; font-size: 12px; color: #888; text-transform: uppercase;">P. UNITARIO</th>
-              <th style="text-align: right; padding: 10px 0; border-bottom: 2px solid #e2e8f0; font-size: 12px; color: #888; text-transform: uppercase;">SUBTOTAL</th>
-            </tr>
-          </thead>
-          <tbody>
-            ${items.map(p => `
-              <tr>
-                <td style="padding: 15px 0; border-bottom: 1px solid #f1f5f9; font-size: 14px;">${p.product_name || p.name}</td>
-                <td style="padding: 15px 0; border-bottom: 1px solid #f1f5f9; font-size: 14px; text-align: center;">${p.quantity}</td>
-                <td style="padding: 15px 0; border-bottom: 1px solid #f1f5f9; font-size: 14px; text-align: right;">$${Number(p.unit_price || p.price).toLocaleString('es-AR')}</td>
-                <td style="padding: 15px 0; border-bottom: 1px solid #f1f5f9; font-size: 14px; text-align: right; font-weight: bold;">$${(Number(p.unit_price || p.price) * p.quantity).toLocaleString('es-AR')}</td>
-              </tr>
-            `).join('')}
-          </tbody>
-        </table>
-        <div style="display: flex; flex-direction: column; align-items: flex-end; gap: 10px; margin-top: 20px;">
-          <div style="width: 250px; border-top: 4px solid #000; margin-top: 15px; padding-top: 15px; display: flex; justify-content: space-between; font-size: 20px; font-weight: 900; color: #000;">
-            <span style="text-transform: uppercase;">TOTAL:</span> <span>$${Number(sale.total).toLocaleString('es-AR')}</span>
-          </div>
-        </div>
-        <div style="margin-top: 80px; text-align: center; font-size: 18px; font-weight: 900; color: #000; text-transform: uppercase; letter-spacing: 1px;">
-          Gracias por su compra
-        </div>
-      </div>
-    `;
-
-    const opt = {
-      margin: 0,
-      filename: `Venta_${sale.id}.pdf`,
-      image: { type: 'jpeg', quality: 0.98 },
-      html2canvas: { scale: 2, useCORS: true },
-      jsPDF: { unit: 'in', format: 'A4', orientation: 'portrait' }
-    };
-
-    const pdfWindow = window.open("", "_blank");
-    window.html2pdf().from(element).set(opt).toPdf().get('pdf').then((pdf) => {
-      const blob = pdf.output('blob');
-      const fileURL = URL.createObjectURL(blob);
-      if (pdfWindow) {
-        pdfWindow.location.href = fileURL;
-      } else {
-        window.open(fileURL, '_blank');
-      }
-    });
+  // --- LOGICA DE SELECCION ---
+  const handleMethodSelection = (method) => {
+    setSelectedPaymentMethod(method);
+    if (method.installments && method.installments.length > 0) {
+      setSelectedInstallment(method.installments[0]);
+    } else {
+      setSelectedInstallment(null);
+    }
   };
 
-  // --- CART MANAGEMENT ---
+  // --- CALCULOS DE VENTA (SIEMPRE RESTA) ---
+  const subtotal = cart.reduce((acc, item) => acc + (item.price * (item.quantity || 0)), 0);
+  
+  let adjustmentPercent = 0;
+  if (selectedInstallment) {
+    // Forzamos a positivo para que la lógica de resta sea consistente
+    adjustmentPercent = Math.abs(selectedInstallment.adjustment);
+  } else if (selectedPaymentMethod) {
+    adjustmentPercent = Number(selectedPaymentMethod.discount_percentage || 0);
+  }
 
+  const discountAmount = (subtotal * adjustmentPercent) / 100;
+  const total = subtotal - discountAmount;
+
+  // --- CART MANAGEMENT ---
   const addToCart = (product) => {
     if (product.stock <= 0) {
       toast({ title: "Sin stock", variant: "destructive" });
@@ -301,38 +210,15 @@ const SalesModule = () => {
       toast({ title: "Faltan datos", variant: "destructive" });
       return;
     }
-    const customItem = {
-      id: `custom-${Date.now()}`,
-      name: customName,
-      price: Number(customPrice),
-      quantity: 1,
-      is_custom: true,
-      stock: 999999
-    };
-    setCart(prev => [...prev, customItem]);
-    setCustomName('');
-    setCustomPrice('');
+    setCart(prev => [...prev, { id: `custom-${Date.now()}`, name: customName, price: Number(customPrice), quantity: 1, is_custom: true, stock: 999999 }]);
+    setCustomName(''); setCustomPrice('');
   };
 
-  const removeFromCart = (productId) => setCart(prev => prev.filter(p => p.id !== productId));
+  const removeFromCart = (id) => setCart(prev => prev.filter(p => p.id !== id));
 
-  const handleQuantityChange = (productId, value, stock) => {
-    const newQty = parseInt(value, 10);
-    if (isNaN(newQty)) {
-      setCart(prev => prev.map(p => p.id === productId ? { ...p, quantity: "" } : p));
-      return;
-    }
-    if (newQty < 1) return;
-    if (newQty > stock) {
-      toast({ title: "Stock insuficiente", variant: "destructive" });
-      return;
-    }
-    setCart(prev => prev.map(p => p.id === productId ? { ...p, quantity: newQty } : p));
-  };
-
-  const updateQuantity = (productId, delta) => {
+  const updateQuantity = (id, delta) => {
     setCart(prev => prev.map(p => {
-      if (p.id === productId) {
+      if (p.id === id) {
         const newQty = (p.quantity || 0) + delta;
         if (newQty < 1 || newQty > p.stock) return p;
         return { ...p, quantity: newQty };
@@ -341,151 +227,127 @@ const SalesModule = () => {
     }));
   };
 
-  const subtotal = cart.reduce((acc, item) => acc + (item.price * (item.quantity || 0)), 0);
-  const discountPercent = getDiscountPercent(selectedPaymentMethod);
-  const discountAmount = (subtotal * discountPercent) / 100;
-  const total = subtotal - discountAmount;
+  const handleQuantityChange = (id, value, stock) => {
+    const newQty = parseInt(value, 10);
+    if (isNaN(newQty)) { setCart(prev => prev.map(p => p.id === id ? { ...p, quantity: "" } : p)); return; }
+    if (newQty >= 1 && newQty <= stock) setCart(prev => prev.map(p => p.id === id ? { ...p, quantity: newQty } : p));
+  };
 
-  // --- CHECKOUT LOGIC (ONLINE / OFFLINE) ---
-
+  // --- CHECKOUT ---
   const handleCheckout = async () => {
     if (cart.length === 0 || !selectedPaymentMethod) return;
-
     setIsProcessing(true);
 
     try {
       const safeCustomerName = (customerName || "").trim() || "Cliente General";
+      const finalMethodName = selectedInstallment 
+        ? `${selectedPaymentMethod.name} (${selectedInstallment.quantity} cuotas)` 
+        : selectedPaymentMethod.name;
 
-      // ---------- OFFLINE ----------
       if (!online) {
         const localSaleId = `local-${branchId}-${Date.now()}`;
-        
-        const discountPercentNow = getDiscountPercent(selectedPaymentMethod);
-        const discountAmountNow = (subtotal * discountPercentNow) / 100;
-        const totalNow = subtotal - discountAmountNow;
-
         const localSale = {
           id: localSaleId,
           branch_id: branchId,
           customer_name: safeCustomerName,
-          total: totalNow,
-          payment_method: selectedPaymentMethod.name,
+          total,
+          payment_method: finalMethodName,
           created_at: new Date().toISOString(),
           status: "pending_sync",
         };
-
-        const localItems = cart.map((item) => ({
-          sale_id: localSaleId,
-          product_id: item.is_custom ? null : item.id,
-          name: item.name,
-          quantity: item.quantity,
-          price: item.price,
-          is_custom: item.is_custom,
-        }));
+        const localItems = cart.map(item => ({ sale_id: localSaleId, product_id: item.is_custom ? null : item.id, name: item.name, quantity: item.quantity, price: item.price, is_custom: item.is_custom }));
 
         await saveLocalSale(localSale, localItems);
-
-        // Dentro de handleCheckout en SalesModule.jsx, cuando estás !online:
-
-await enqueueAction({
-  type: "sale:create",
-  payload: {
-    localSaleId: localSaleId,
-    branch_id: branchId,
-    customer_name: safeCustomerName,
-    total: totalNow,
-    payment_method: selectedPaymentMethod.name,
-    // Aseguramos que cada item lleve su nombre claramente
-    items: cart.map(item => ({
-      id: item.is_custom ? null : item.id,
-      name: item.name, // <--- Importante
-      quantity: item.quantity,
-      price: item.price,
-      is_custom: item.is_custom
-    })),
-    needsReceipt,
-  },
-});
-
-        const stockPayload = cart
-          .filter((i) => !i.is_custom)
-          .map((i) => ({ product_id: i.id, quantity: i.quantity }));
-
-        if (stockPayload.length) {
-          await decrementLocalStock(stockPayload);
-        }
-
-        toast({ title: "Venta guardada (offline)", description: "Se sincronizará automáticamente al volver internet." });
-
-        if (needsReceipt === "yes") {
-          generateSalePDF(localSale, cart);
-        }
-
-        setCustomerName("");
-        setCart([]);
-        setNeedsReceipt('no');
-
-        await refreshPending();
-        await fetchProducts(); 
-        return;
-      }
-
-      // ---------- ONLINE ----------
-      const { data: sale, error: saleError } = await supabase
-        .from("sales")
-        .insert([
-          {
-            branch_id: branchId,
-            customer_name: safeCustomerName,
-            total,
-            payment_method: selectedPaymentMethod.name,
-          },
-        ])
-        .select()
-        .single();
-
-      if (saleError) throw saleError;
-
-      const saleItems = cart.map((item) => ({
-        sale_id: sale.id,
-        product_id: item.is_custom ? null : item.id,
-        product_name: item.name,
-        quantity: item.quantity,
-        unit_price: item.price,
-        is_custom: item.is_custom,
-      }));
-
-      const { error: itemsError } = await supabase.from("sale_items").insert(saleItems);
-      if (itemsError) throw itemsError;
-
-      const stockItemsToUpdate = cart.filter((i) => !i.is_custom);
-      if (stockItemsToUpdate.length > 0) {
-        const stockPayload = stockItemsToUpdate.map((i) => ({
-          product_id: i.id,
-          quantity: i.quantity,
-        }));
-
-        const { error: rpcError } = await supabase.rpc("apply_sale_stock", {
-          p_branch_id: branchId,
-          p_items: stockPayload,
+        await enqueueAction({
+          type: "sale:create",
+          payload: { localSaleId, branch_id: branchId, customer_name: safeCustomerName, total, payment_method: finalMethodName, items: localItems, needsReceipt }
         });
-        if (rpcError) throw rpcError;
+
+        const stockPayload = cart.filter(i => !i.is_custom).map(i => ({ product_id: i.id, quantity: i.quantity }));
+        if (stockPayload.length) await decrementLocalStock(stockPayload);
+
+        toast({ title: "Venta guardada (offline)" });
+        if (needsReceipt === "yes") generateSalePDF(localSale, cart);
+      } else {
+        const { data: sale, error: saleError } = await supabase.from("sales").insert([{ branch_id: branchId, customer_name: safeCustomerName, total, payment_method: finalMethodName }]).select().single();
+        if (saleError) throw saleError;
+
+        const saleItems = cart.map(item => ({ sale_id: sale.id, product_id: item.is_custom ? null : item.id, product_name: item.name, quantity: item.quantity, unit_price: item.price, is_custom: item.is_custom }));
+        await supabase.from("sale_items").insert(saleItems);
+
+        const stockToUpdate = cart.filter(i => !i.is_custom);
+        if (stockToUpdate.length > 0) {
+          await supabase.rpc("apply_sale_stock", { p_branch_id: branchId, p_items: stockToUpdate.map(i => ({ product_id: i.id, quantity: i.quantity })) });
+        }
+
+        toast({ title: "Venta realizada con éxito" });
+        if (needsReceipt === "yes") generateSalePDF(sale, cart);
       }
 
-      toast({ title: "Venta realizada con éxito" });
-
-      if (needsReceipt === "yes") generateSalePDF(sale, cart);
-
-      setCustomerName("");
-      setCart([]);
-      setNeedsReceipt('no');
-
+      setCustomerName(""); setCart([]); setNeedsReceipt('no');
       await fetchProducts();
     } catch (error) {
       toast({ title: "Error al procesar", variant: "destructive" });
     } finally {
       setIsProcessing(false);
     }
+  };
+
+  const generateSalePDF = (sale, items) => {
+    const element = document.createElement('div');
+    element.innerHTML = `
+      <div style="font-family: Arial, sans-serif; padding: 40px; color: #333; background: white; width: 750px; margin: 0 auto;">
+        <div style="text-align: center; margin-bottom: 40px;">
+          ${branchDetails.logo_url ? `<img src="${branchDetails.logo_url}" style="max-height: 120px; display: block; margin: 0 auto 15px auto;" />` : ''}
+          <h1 style="font-size: 32px; font-weight: 900; margin: 0; text-transform: uppercase;">${branchDetails.name || 'SUCURSAL'}</h1>
+          <p style="font-size: 14px; color: #666; letter-spacing: 2px; margin-top: 10px; font-weight: bold;">COMPROBANTE DE COMPRA</p>
+        </div>
+        <div style="display: flex; justify-content: space-between; margin-bottom: 30px; font-size: 14px; border-bottom: 2px solid #f0f0f0; padding-bottom: 25px;">
+          <div>
+            <p style="margin: 5px 0;"><strong>CLIENTE:</strong> ${sale.customer_name}</p>
+            <p style="margin: 5px 0;"><strong>MÉTODO:</strong> ${sale.payment_method}</p>
+            <p style="margin: 5px 0;"><strong>FECHA:</strong> ${formatDateTime(sale.created_at).split(',')[0]}</p>
+          </div>
+          <div style="text-align: right;">
+            <p style="margin: 5px 0;"><strong>DIRECCIÓN:</strong> ${branchDetails.address || 'No disponible'}</p>
+            <p style="margin: 5px 0;"><strong>WHATSAPP:</strong> ${branchDetails.tel || 'No disponible'}</p>
+          </div>
+        </div>
+        <table style="width: 100%; border-collapse: collapse; margin-bottom: 40px;">
+          <thead>
+            <tr>
+              <th style="text-align: left; padding: 10px 0; border-bottom: 2px solid #e2e8f0; font-size: 12px; color: #888;">DESCRIPCIÓN</th>
+              <th style="text-align: center; padding: 10px 0; border-bottom: 2px solid #e2e8f0; font-size: 12px; color: #888;">CANT.</th>
+              <th style="text-align: right; padding: 10px 0; border-bottom: 2px solid #e2e8f0; font-size: 12px; color: #888;">P. UNIT</th>
+              <th style="text-align: right; padding: 10px 0; border-bottom: 2px solid #e2e8f0; font-size: 12px; color: #888;">SUBTOTAL</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${items.map(p => `
+              <tr>
+                <td style="padding: 15px 0; border-bottom: 1px solid #f1f5f9; font-size: 14px;">${p.product_name || p.name}</td>
+                <td style="padding: 15px 0; border-bottom: 1px solid #f1f5f9; font-size: 14px; text-align: center;">${p.quantity}</td>
+                <td style="padding: 15px 0; border-bottom: 1px solid #f1f5f9; font-size: 14px; text-align: right;">$${Number(p.unit_price || p.price).toLocaleString('es-AR')}</td>
+                <td style="padding: 15px 0; border-bottom: 1px solid #f1f5f9; font-size: 14px; text-align: right; font-weight: bold;">$${(Number(p.unit_price || p.price) * p.quantity).toLocaleString('es-AR')}</td>
+              </tr>
+            `).join('')}
+          </tbody>
+        </table>
+        <div style="display: flex; flex-direction: column; align-items: flex-end;">
+          <div style="width: 250px; border-top: 4px solid #000; padding-top: 15px; display: flex; justify-content: space-between; font-size: 20px; font-weight: 900;">
+            <span>TOTAL:</span> <span>$${Number(sale.total).toLocaleString('es-AR')}</span>
+          </div>
+        </div>
+      </div>
+    `;
+    const opt = { margin: 0, filename: `Venta_${sale.id}.pdf`, image: { type: 'jpeg', quality: 0.98 }, html2canvas: { scale: 2, useCORS: true }, jsPDF: { unit: 'in', format: 'A4', orientation: 'portrait' } };
+    const pdfWindow = window.open("", "_blank");
+    window.html2pdf().from(element).set(opt).toPdf().get('pdf').then((pdf) => {
+      const blob = pdf.output('blob');
+      const fileURL = URL.createObjectURL(blob);
+      if (pdfWindow) pdfWindow.location.href = fileURL;
+      else window.open(fileURL, '_blank');
+    });
   };
 
   const totalPages = Math.ceil(totalCount / itemsPerPage);
@@ -599,11 +461,7 @@ await enqueueAction({
                               type="number"
                               value={item.quantity}
                               onChange={(e) => handleQuantityChange(item.id, e.target.value, item.stock)}
-                              onBlur={() => {
-                                if (item.quantity === "" || item.quantity < 1) {
-                                  setCart(prev => prev.map(p => p.id === item.id ? { ...p, quantity: 1 } : p));
-                                }
-                              }}
+                              onBlur={() => { if (item.quantity === "" || item.quantity < 1) updateQuantity(item.id, 0); }}
                               className="w-10 text-center text-xs font-bold bg-transparent outline-none [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
                             />
                             <button onClick={() => updateQuantity(item.id, 1)} className="p-1.5 hover:bg-gray-100 border-l"><Plus className="w-3 h-3" /></button>
@@ -632,26 +490,54 @@ await enqueueAction({
                     <label className="text-[10px] font-bold text-gray-500 uppercase tracking-wider">Método de Pago</label>
                     <div className="grid grid-cols-2 gap-2">
                       {paymentMethods.map(method => (
-                        <Button key={method.id} variant={selectedPaymentMethod?.id === method.id ? "default" : "outline"} onClick={() => setSelectedPaymentMethod(method)} className={`w-full text-[11px] h-auto py-2.5 flex flex-col border-gray-200 ${selectedPaymentMethod?.id === method.id ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-white hover:bg-indigo-50'}`}>
-                          <span className="font-bold w-full px-1 whitespace-normal break-words leading-tight">
-  {method.name}
-</span>
-                          {getDiscountPercent(method) > 0 && (
-                            <span className="text-[10px] bg-green-500 text-white px-1.5 rounded-full">
-                              -{getDiscountPercent(method)}%
-                            </span>
+                        <Button key={method.id} variant={selectedPaymentMethod?.id === method.id ? "default" : "outline"} onClick={() => handleMethodSelection(method)} className={`w-full text-[11px] h-auto py-2.5 flex flex-col border-gray-200 ${selectedPaymentMethod?.id === method.id ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-white hover:bg-indigo-50'}`}>
+                          <span className="font-bold w-full px-1 whitespace-normal break-words leading-tight">{method.name}</span>
+                          {(!method.installments || method.installments.length === 0) && method.discount_percentage > 0 && (
+                            <span className="text-[10px] bg-green-500 text-white px-1.5 rounded-full">-{method.discount_percentage}%</span>
                           )}
                         </Button>
                       ))}
                     </div>
                   </div>
+
+                  {selectedPaymentMethod?.installments?.length > 0 && (
+                    <div className="p-3 bg-indigo-50 rounded-xl border border-indigo-100 space-y-2">
+                      <label className="text-[10px] font-bold text-indigo-600 uppercase">Seleccionar Cuotas</label>
+                      <div className="grid grid-cols-3 gap-2">
+                        {selectedPaymentMethod.installments.map((ins, idx) => (
+                          <button
+                            key={idx}
+                            onClick={() => setSelectedInstallment(ins)}
+                            className={`p-2 rounded-lg border text-center transition-all ${
+                              selectedInstallment === ins 
+                              ? 'bg-indigo-600 border-indigo-600 text-white shadow-sm' 
+                              : 'bg-white border-gray-200 text-gray-600 hover:border-indigo-300'
+                            }`}
+                          >
+                            <p className="text-xs font-black">{ins.quantity}x</p>
+                            <p className="text-[8px] font-bold opacity-80">
+                              {ins.adjustment >= 0 ? `+${ins.adjustment}%` : `${ins.adjustment}%`}
+                            </p>
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
                 </div>
               </div>
 
               <div className="p-4 border-t border-gray-200 bg-gray-50 space-y-4 shrink-0">
                 <div className="space-y-1">
                   <div className="flex justify-between text-xs text-gray-500 font-medium"><span>Subtotal</span><span>{formatCurrency(subtotal)}</span></div>
-                  {discountPercent > 0 && <div className="flex justify-between text-xs text-green-600 font-bold"><span><Tag className="w-3 h-3 inline mr-1" /> Dcto ({discountPercent}%)</span><span>- {formatCurrency(discountAmount)}</span></div>}
+                  
+                  {/* AQUÍ ESTABA EL ERROR: USANDO adjustmentAmount y adjustmentPercent correctamente */}
+                  {adjustmentPercent !== 0 && (
+                    <div className="flex justify-between text-xs font-bold text-green-600">
+                      <span><Tag className="w-3 h-3 inline mr-1" /> Dcto. ({adjustmentPercent}%)</span>
+                      <span>- {formatCurrency(discountAmount)}</span>
+                    </div>
+                  )}
+
                   <div className="flex justify-between items-center pt-2"><span className="text-gray-900 font-bold text-sm">Total</span><span className="text-xl md:text-2xl font-black text-indigo-700">{formatCurrency(total)}</span></div>
                 </div>
                 <Button className="w-full bg-indigo-600 hover:bg-indigo-700 text-sm md:text-lg h-12 font-bold shadow-lg" disabled={cart.length === 0 || isProcessing} onClick={handleCheckout}>
