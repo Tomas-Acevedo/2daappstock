@@ -7,11 +7,17 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
   Search, ShoppingCart, Trash2, Plus, Minus,
-  Loader2, Tag, ChevronLeft, ChevronRight, Edit3, User, CheckCircle2
+  Loader2, Tag, ChevronLeft, ChevronRight, Edit3, User, CheckCircle2, Settings2
 } from 'lucide-react';
 import { supabase } from '@/lib/customSupabaseClient';
 import { toast } from '@/components/ui/use-toast';
 import { formatCurrency, formatDateTime } from '@/lib/utils';
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 
 // Offline Imports
 import {
@@ -52,9 +58,11 @@ const SalesModule = () => {
 
   const [cart, setCart] = useState([]);
   const [selectedPaymentMethod, setSelectedPaymentMethod] = useState(null);
-  const [selectedInstallment, setSelectedInstallment] = useState(null);
+  const [selectedInstallment, setSelectedInstallment] = useState(null); // Manual por defecto
   const [isProcessing, setIsProcessing] = useState(false);
   const [branchDetails, setBranchDetails] = useState({ name: '', logo_url: '', address: '', tel: '' });
+  
+  const [isInstallmentDialogOpen, setIsInstallmentDialogOpen] = useState(false);
 
   // --- FETCHERS ---
 
@@ -87,9 +95,8 @@ const SalesModule = () => {
         methods = await getPaymentMethodsByBranch(branchId);
       }
       setPaymentMethods(methods);
-      if (methods.length > 0) {
-        handleMethodSelection(methods[0]);
-      }
+      setSelectedPaymentMethod(null);
+      setSelectedInstallment(null);
     } catch {
       const cached = await getPaymentMethodsByBranch(branchId);
       setPaymentMethods(cached || []);
@@ -165,19 +172,21 @@ const SalesModule = () => {
   // --- LOGICA DE SELECCION ---
   const handleMethodSelection = (method) => {
     setSelectedPaymentMethod(method);
+    // IMPORTANTE: Al seleccionar un método nuevo, reseteamos la cuota a null
+    setSelectedInstallment(null); 
+    
     if (method.installments && method.installments.length > 0) {
-      setSelectedInstallment(method.installments[0]);
+      setIsInstallmentDialogOpen(true);
     } else {
-      setSelectedInstallment(null);
+      setIsInstallmentDialogOpen(false);
     }
   };
 
-  // --- CALCULOS DE VENTA (SIEMPRE RESTA) ---
+  // --- CALCULOS DE VENTA ---
   const subtotal = cart.reduce((acc, item) => acc + (item.price * (item.quantity || 0)), 0);
   
   let adjustmentPercent = 0;
   if (selectedInstallment) {
-    // Forzamos a positivo para que la lógica de resta sea consistente
     adjustmentPercent = Math.abs(selectedInstallment.adjustment);
   } else if (selectedPaymentMethod) {
     adjustmentPercent = Number(selectedPaymentMethod.discount_percentage || 0);
@@ -235,7 +244,16 @@ const SalesModule = () => {
 
   // --- CHECKOUT ---
   const handleCheckout = async () => {
-    if (cart.length === 0 || !selectedPaymentMethod) return;
+    // Verificamos que si el método tiene cuotas, se haya seleccionado una manualmente
+    const hasInstallments = selectedPaymentMethod?.installments?.length > 0;
+    if (cart.length === 0 || !selectedPaymentMethod || (hasInstallments && !selectedInstallment)) {
+        toast({ 
+            title: "Datos incompletos", 
+            description: hasInstallments && !selectedInstallment ? "Debes seleccionar una cuota" : "Selecciona un método de pago",
+            variant: "destructive" 
+        });
+        return;
+    }
     setIsProcessing(true);
 
     try {
@@ -285,6 +303,7 @@ const SalesModule = () => {
       }
 
       setCustomerName(""); setCart([]); setNeedsReceipt('no');
+      setSelectedPaymentMethod(null); setSelectedInstallment(null);
       await fetchProducts();
     } catch (error) {
       toast({ title: "Error al procesar", variant: "destructive" });
@@ -354,6 +373,39 @@ const SalesModule = () => {
 
   return (
     <div className="min-h-screen lg:h-[calc(100vh-100px)] flex flex-col pb-20 lg:pb-0">
+      
+      <Dialog open={isInstallmentDialogOpen} onOpenChange={setIsInstallmentDialogOpen}>
+        <DialogContent className="sm:max-w-[425px] bg-white">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Settings2 className="w-5 h-5 text-indigo-600" />
+              Seleccionar Cuotas - {selectedPaymentMethod?.name}
+            </DialogTitle>
+          </DialogHeader>
+          <div className="grid grid-cols-2 gap-3 py-4">
+            {selectedPaymentMethod?.installments?.map((ins, idx) => (
+              <Button
+                key={idx}
+                variant={selectedInstallment === ins ? "default" : "outline"}
+                className={`h-20 flex flex-col gap-1 border-2 transition-all ${
+                    selectedInstallment === ins ? 'bg-indigo-600 border-indigo-600 text-white shadow-md scale-105' : 'border-gray-100 hover:border-indigo-200'
+                }`}
+                onClick={() => {
+                  setSelectedInstallment(ins);
+                  setIsInstallmentDialogOpen(false);
+                }}
+              >
+                <span className="text-xl font-black">{ins.quantity}x</span>
+                <span className="text-xs opacity-80">{ins.adjustment}% Descuento</span>
+              </Button>
+            ))}
+          </div>
+          <div className="text-center text-[10px] text-gray-400">
+             Selección manual requerida para procesar la venta.
+          </div>
+        </DialogContent>
+      </Dialog>
+
       <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full flex flex-col h-full min-h-0">
         <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4 mb-6 shrink-0 px-1">
           <div className="flex items-center gap-3">
@@ -487,42 +539,38 @@ const SalesModule = () => {
                   </div>
 
                   <div className="space-y-2">
-                    <label className="text-[10px] font-bold text-gray-500 uppercase tracking-wider">Método de Pago</label>
+                    <div className="flex justify-between items-end">
+                       <label className="text-[10px] font-bold text-gray-500 uppercase tracking-wider">Método de Pago</label>
+                       {selectedPaymentMethod?.installments?.length > 0 && (
+                          <button 
+                            onClick={() => setIsInstallmentDialogOpen(true)}
+                            className="text-[10px] text-indigo-600 font-bold hover:underline flex items-center gap-1"
+                          >
+                            <Settings2 className="w-3 h-3"/> Editar Cuotas
+                          </button>
+                       )}
+                    </div>
                     <div className="grid grid-cols-2 gap-2">
                       {paymentMethods.map(method => (
-                        <Button key={method.id} variant={selectedPaymentMethod?.id === method.id ? "default" : "outline"} onClick={() => handleMethodSelection(method)} className={`w-full text-[11px] h-auto py-2.5 flex flex-col border-gray-200 ${selectedPaymentMethod?.id === method.id ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-white hover:bg-indigo-50'}`}>
+                        <Button 
+                          key={method.id} 
+                          variant={selectedPaymentMethod?.id === method.id ? "default" : "outline"} 
+                          onClick={() => handleMethodSelection(method)} 
+                          className={`w-full text-[11px] h-auto py-2.5 flex flex-col border-gray-200 ${selectedPaymentMethod?.id === method.id ? 'bg-indigo-600 text-white border-indigo-600 shadow-md scale-[1.02]' : 'bg-white hover:bg-indigo-50'}`}
+                        >
                           <span className="font-bold w-full px-1 whitespace-normal break-words leading-tight">{method.name}</span>
                           {(!method.installments || method.installments.length === 0) && method.discount_percentage > 0 && (
                             <span className="text-[10px] bg-green-500 text-white px-1.5 rounded-full">-{method.discount_percentage}%</span>
+                          )}
+                          {selectedPaymentMethod?.id === method.id && selectedInstallment && (
+                            <span className="text-[9px] mt-1 bg-white/20 px-1 rounded uppercase font-black tracking-tighter">
+                                {selectedInstallment.quantity} cuotas
+                            </span>
                           )}
                         </Button>
                       ))}
                     </div>
                   </div>
-
-                  {selectedPaymentMethod?.installments?.length > 0 && (
-                    <div className="p-3 bg-indigo-50 rounded-xl border border-indigo-100 space-y-2">
-                      <label className="text-[10px] font-bold text-indigo-600 uppercase">Seleccionar Cuotas</label>
-                      <div className="grid grid-cols-3 gap-2">
-                        {selectedPaymentMethod.installments.map((ins, idx) => (
-                          <button
-                            key={idx}
-                            onClick={() => setSelectedInstallment(ins)}
-                            className={`p-2 rounded-lg border text-center transition-all ${
-                              selectedInstallment === ins 
-                              ? 'bg-indigo-600 border-indigo-600 text-white shadow-sm' 
-                              : 'bg-white border-gray-200 text-gray-600 hover:border-indigo-300'
-                            }`}
-                          >
-                            <p className="text-xs font-black">{ins.quantity}x</p>
-                            <p className="text-[8px] font-bold opacity-80">
-                              {ins.adjustment >= 0 ? `+${ins.adjustment}%` : `${ins.adjustment}%`}
-                            </p>
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-                  )}
                 </div>
               </div>
 
@@ -530,7 +578,6 @@ const SalesModule = () => {
                 <div className="space-y-1">
                   <div className="flex justify-between text-xs text-gray-500 font-medium"><span>Subtotal</span><span>{formatCurrency(subtotal)}</span></div>
                   
-                  {/* AQUÍ ESTABA EL ERROR: USANDO adjustmentAmount y adjustmentPercent correctamente */}
                   {adjustmentPercent !== 0 && (
                     <div className="flex justify-between text-xs font-bold text-green-600">
                       <span><Tag className="w-3 h-3 inline mr-1" /> Dcto. ({adjustmentPercent}%)</span>
@@ -538,10 +585,18 @@ const SalesModule = () => {
                     </div>
                   )}
 
-                  <div className="flex justify-between items-center pt-2"><span className="text-gray-900 font-bold text-sm">Total</span><span className="text-xl md:text-2xl font-black text-indigo-700">{formatCurrency(total)}</span></div>
+                  <div className="flex justify-between items-center pt-2">
+                    <span className="text-gray-900 font-bold text-sm">Total</span>
+                    <span className="text-xl md:text-2xl font-black text-indigo-700">{formatCurrency(total)}</span>
+                  </div>
                 </div>
-                <Button className="w-full bg-indigo-600 hover:bg-indigo-700 text-sm md:text-lg h-12 font-bold shadow-lg" disabled={cart.length === 0 || isProcessing} onClick={handleCheckout}>
-                  {isProcessing ? <Loader2 className="animate-spin mr-2 h-4 w-4" /> : <ShoppingCart className="mr-2 h-4 w-4" />} Confirmar Venta
+                <Button 
+                    className="w-full bg-indigo-600 hover:bg-indigo-700 text-sm md:text-lg h-12 font-bold shadow-lg" 
+                    disabled={cart.length === 0 || isProcessing || !selectedPaymentMethod || (selectedPaymentMethod?.installments?.length > 0 && !selectedInstallment)} 
+                    onClick={handleCheckout}
+                >
+                  {isProcessing ? <Loader2 className="animate-spin mr-2 h-4 w-4" /> : <ShoppingCart className="mr-2 h-4 w-4" />} 
+                  {selectedPaymentMethod?.installments?.length > 0 && !selectedInstallment ? 'Seleccionar Cuota' : 'Confirmar Venta'}
                 </Button>
               </div>
             </div>
