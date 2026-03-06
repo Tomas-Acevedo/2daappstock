@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useParams } from 'react-router-dom';
 import { motion } from 'framer-motion';
-import { Calendar, Search, Trash2, Edit, ChevronLeft, ChevronRight, Wallet, Loader2, FileText, CloudOff } from 'lucide-react';
+import { Calendar, Search, Trash2, Edit, ChevronLeft, ChevronRight, Wallet, Loader2, FileText, CloudOff, CalendarDays } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { toast } from '@/components/ui/use-toast';
 import { formatCurrency, formatDateTime, getArgentinaDate } from '@/lib/utils';
@@ -36,7 +36,8 @@ const SalesHistoryPage = () => {
   const pageSize = 20;
   const [hasMore, setHasMore] = useState(true);
 
-  const [dateRange, setDateRange] = useState({ start: getArgentinaDate(), end: getArgentinaDate() });
+  // Nuevo estado para el día seleccionado (por defecto hoy)
+  const [selectedDate, setSelectedDate] = useState(getArgentinaDate());
   const [paymentFilter, setPaymentFilter] = useState('all');
 
   const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
@@ -46,6 +47,14 @@ const SalesHistoryPage = () => {
   const isOwner = userRole === 'owner';
   const canModifySales = isOwner || allowEditDelete;
 
+  // Generar array de los últimos 7 días
+  const last7Days = Array.from({ length: 7 }, (_, i) => {
+    const d = new Date();
+    d.setDate(d.getDate() - i);
+    // Formato YYYY-MM-DD para Argentina
+    return d.toISOString().split('T')[0];
+  });
+
   useEffect(() => {
     const initializePage = async () => {
       setRoleLoading(true);
@@ -53,11 +62,9 @@ const SalesHistoryPage = () => {
       await fetchBranchDetails();
       await fetchPaymentMethods();
       
-      // Fallback de rol para offline extremo
       if (!online && !localStorage.getItem("gestify_role")) {
         setUserRole("pos");
       }
-      
       setRoleLoading(false);
     };
     initializePage();
@@ -65,37 +72,25 @@ const SalesHistoryPage = () => {
 
   const fetchUserRole = async () => {
     try {
-      // 1) Si estoy offline, uso cache
       if (!online) {
         const cachedRole = localStorage.getItem("gestify_role");
         if (cachedRole) setUserRole(cachedRole);
         return;
       }
-
-      // 2) Online normal
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) {
-        // Si no hay user logueado pero estamos online, intentamos cache
         const cachedRole = localStorage.getItem("gestify_role");
         if (cachedRole) setUserRole(cachedRole);
         return;
       }
-
-      const { data: profile, error } = await supabase
-        .from("profiles")
-        .select("role")
-        .eq("id", user.id)
-        .single();
-
+      const { data: profile, error } = await supabase.from("profiles").select("role").eq("id", user.id).single();
       if (error) throw error;
-
       const role = (profile?.role || "").trim().toLowerCase();
       if (role) {
         setUserRole(role);
-        localStorage.setItem("gestify_role", role); // ✅ cache para offline
+        localStorage.setItem("gestify_role", role);
       }
     } catch (e) {
-      // fallback final
       const cachedRole = localStorage.getItem("gestify_role");
       if (cachedRole) setUserRole(cachedRole);
     }
@@ -104,12 +99,7 @@ const SalesHistoryPage = () => {
   const fetchBranchDetails = async () => {
     try {
       if (online) {
-        const { data, error } = await supabase
-          .from("branches")
-          .select("id, name, logo_url, address, tel, allow_sales_edit_delete")
-          .eq("id", branchId)
-          .single();
-
+        const { data, error } = await supabase.from("branches").select("id, name, logo_url, address, tel, allow_sales_edit_delete").eq("id", branchId).single();
         if (error) throw error;
         if (data) {
           setBranchDetails({ name: data.name, logo_url: data.logo_url, address: data.address, tel: data.tel });
@@ -125,21 +115,14 @@ const SalesHistoryPage = () => {
       }
     } catch {
       const cached = await getBranchById(branchId);
-      if (cached) {
-        setBranchDetails({ name: cached.name, logo_url: cached.logo_url, address: cached.address, tel: cached.tel });
-        setAllowEditDelete(cached.allow_sales_edit_delete ?? true);
-      }
+      if (cached) setBranchDetails({ name: cached.name, logo_url: cached.logo_url, address: cached.address, tel: cached.tel });
     }
   };
 
   const fetchPaymentMethods = async () => {
     try {
       if (online) {
-        const { data, error } = await supabase
-  .from("payment_methods")
-  .select("*") // ✅ importante: no recortar campos
-  .eq("branch_id", branchId);
-
+        const { data, error } = await supabase.from("payment_methods").select("*").eq("branch_id", branchId);
         if (error) throw error;
         const active = (data || []).filter(m => m.is_active);
         setPaymentMethods(active);
@@ -154,18 +137,8 @@ const SalesHistoryPage = () => {
     }
   };
 
-  const fetchLocalSales = useCallback(async () => {
-    if (!branchId) return;
-    const locals = await getLocalSalesForBranch(branchId);
-    setLocalSales(locals);
-  }, [branchId]);
-
-  useEffect(() => {
-    fetchLocalSales();
-  }, [fetchLocalSales, pendingCount, online]);
-
   const fetchSales = useCallback(async () => {
-    if (!branchId || roleLoading) return; // Ya no depende estrictamente de userRole para entrar
+    if (!branchId || roleLoading) return;
     setLoading(true);
 
     try {
@@ -173,15 +146,9 @@ const SalesHistoryPage = () => {
       setLocalSales(locals);
 
       if (!online) {
-        let filtered = [...locals];
-        // Si no tenemos rol, se asume no-owner (lógica de hoy solamente)
-        if (isOwner) {
-          if (dateRange.start) filtered = filtered.filter(s => (s.created_at || "").startsWith(dateRange.start));
-          if (dateRange.end) filtered = filtered.filter(s => (s.created_at || "").startsWith(dateRange.end));
-          if (paymentFilter !== "all") filtered = filtered.filter(s => s.payment_method === paymentFilter);
-        } else {
-          const today = getArgentinaDate();
-          filtered = filtered.filter(s => (s.created_at || "").startsWith(today));
+        let filtered = locals.filter(s => (s.created_at || "").startsWith(selectedDate));
+        if (paymentFilter !== "all") {
+          filtered = filtered.filter(s => s.payment_method === paymentFilter);
         }
 
         const start = page * pageSize;
@@ -194,44 +161,36 @@ const SalesHistoryPage = () => {
         return;
       }
 
-      // ONLINE MODE
       let query = supabase
         .from("sales")
         .select(`*, sale_items (product_id, quantity, product_name, unit_price)`)
         .eq("branch_id", branchId)
+        .gte("created_at", `${selectedDate}T00:00:00-03:00`)
+        .lte("created_at", `${selectedDate}T23:59:59-03:00`)
         .order("created_at", { ascending: false })
         .range(page * pageSize, (page + 1) * pageSize - 1);
 
-      let totalQuery = supabase.from("sales").select("total, payment_method").eq("branch_id", branchId);
+      let totalQuery = supabase.from("sales")
+        .select("total, payment_method")
+        .eq("branch_id", branchId)
+        .gte("created_at", `${selectedDate}T00:00:00-03:00`)
+        .lte("created_at", `${selectedDate}T23:59:59-03:00`);
 
-      if (isOwner) {
-        if (dateRange.start) {
-          query = query.gte("created_at", `${dateRange.start}T00:00:00-03:00`);
-          totalQuery = totalQuery.gte("created_at", `${dateRange.start}T00:00:00-03:00`);
-        }
-        if (dateRange.end) {
-          query = query.lte("created_at", `${dateRange.end}T23:59:59-03:00`);
-          totalQuery = totalQuery.lte("created_at", `${dateRange.end}T23:59:59-03:00`);
-        }
-        if (paymentFilter !== "all") {
-          query = query.eq("payment_method", paymentFilter);
-          totalQuery = totalQuery.eq("payment_method", paymentFilter);
-        }
-      } else {
-        const today = getArgentinaDate();
-        query = query.gte("created_at", `${today}T00:00:00-03:00`).lte("created_at", `${today}T23:59:59-03:00`);
-        totalQuery = totalQuery.gte("created_at", `${today}T00:00:00-03:00`).lte("created_at", `${today}T23:59:59-03:00`);
+      if (paymentFilter !== "all") {
+        query = query.eq("payment_method", paymentFilter);
+        totalQuery = totalQuery.eq("payment_method", paymentFilter);
       }
 
       const [salesRes, totalsRes] = await Promise.all([query, totalQuery]);
       const remoteSales = salesRes.data || [];
-      const merged = mergeSales(remoteSales, locals);
+      const relevantLocals = locals.filter(s => (s.created_at || "").startsWith(selectedDate));
+      const merged = mergeSales(remoteSales, relevantLocals);
 
       setSales(merged);
       setHasMore(remoteSales.length === pageSize);
 
       const remoteTotal = (totalsRes.data || []).reduce((acc, s) => acc + Number(s.total), 0);
-      const localTotal = locals.reduce((acc, s) => acc + Number(s.total || 0), 0);
+      const localTotal = relevantLocals.reduce((acc, s) => acc + Number(s.total || 0), 0);
       setSummaryData({ total: remoteTotal + localTotal });
 
     } catch (error) {
@@ -239,17 +198,18 @@ const SalesHistoryPage = () => {
     } finally {
       setLoading(false);
     }
-  }, [branchId, roleLoading, userRole, page, dateRange, paymentFilter, isOwner, online]);
+  }, [branchId, roleLoading, page, selectedDate, paymentFilter, online]);
 
   useEffect(() => { fetchSales(); }, [fetchSales]);
 
+  const handleDateChange = (date) => {
+    setSelectedDate(date);
+    setPage(0);
+  };
+
   const handleDelete = async (sale) => {
-    if (!online) {
-      toast({ title: "Sin conexión", description: "No podés eliminar ventas sin internet.", variant: "destructive" });
-      return;
-    }
-    if (sale.__local) {
-      toast({ title: "Venta pendiente", description: "Esta venta aún no se sincronizó.", variant: "destructive" });
+    if (!online || sale.__local) {
+      toast({ title: "No disponible", description: "No se puede eliminar ventas locales o sin conexión.", variant: "destructive" });
       return;
     }
     if (!window.confirm("¿Estás seguro? Se restaurará el stock.")) return;
@@ -267,7 +227,7 @@ const SalesHistoryPage = () => {
 
   const handleUpdate = async () => {
     if (!online || editingSale?.__local) {
-      toast({ title: "No disponible", description: "Solo se puede editar cuando está sincronizada.", variant: "destructive" });
+      toast({ title: "No disponible", variant: "destructive" });
       return;
     }
     try {
@@ -337,7 +297,9 @@ const SalesHistoryPage = () => {
 
   return (
     <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="space-y-6">
-      <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
+      
+      {/* Header y Resumen */}
+      <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
         <div>
           <h1 className="text-3xl font-black text-gray-900 flex items-center gap-3">
             Historial de Ventas
@@ -345,15 +307,61 @@ const SalesHistoryPage = () => {
           </h1>
           <p className="text-sm text-gray-500 font-medium">Sucursal: {branchDetails.name}</p>
         </div>
-        {isOwner && <div className="bg-white border border-gray-200 rounded-xl px-4 py-3 shadow-sm flex items-center gap-3"><Wallet className="w-5 h-5 text-indigo-600" /><div><div className="text-xs text-gray-500 font-bold uppercase tracking-wider">Total</div><div className="text-lg font-black text-gray-900">{formatCurrency(summaryData.total)}</div></div></div>}
+        
+        {/* MODIFICACIÓN: Condición isOwner para mostrar el total acumulado */}
+        {isOwner && (
+          <div className="bg-white border border-gray-200 rounded-xl px-4 py-3 shadow-sm flex items-center gap-3 shrink-0">
+            <Wallet className="w-5 h-5 text-indigo-600" />
+            <div>
+              <div className="text-xs text-gray-500 font-bold uppercase tracking-wider">Total</div>
+              <div className="text-lg font-black text-gray-900">{formatCurrency(summaryData.total)}</div>
+            </div>
+          </div>
+        )}
       </div>
 
+      {/* Selector de últimos 7 días */}
+      <div className="bg-white p-2 rounded-2xl border border-gray-200 shadow-sm overflow-hidden">
+        <div className="flex items-center gap-2 mb-2 px-2 pt-1">
+            <CalendarDays className="w-4 h-4 text-indigo-600" />
+            <span className="text-[10px] font-black uppercase text-gray-400 tracking-widest">Seleccionar Día</span>
+        </div>
+        <div className="flex gap-2 overflow-x-auto pb-2 px-1 scrollbar-hide">
+            {last7Days.map((dateStr) => {
+                const isSelected = selectedDate === dateStr;
+                const dateObj = new Date(dateStr + "T12:00:00");
+                const dayName = dateObj.toLocaleDateString('es-AR', { weekday: 'short' });
+                const dayNum = dateObj.toLocaleDateString('es-AR', { day: '2-digit' });
+                const monthName = dateObj.toLocaleDateString('es-AR', { month: 'short' });
+
+                return (
+                    <button
+                        key={dateStr}
+                        onClick={() => handleDateChange(dateStr)}
+                        className={`flex flex-col items-center justify-center min-w-[70px] py-3 rounded-xl border-2 transition-all ${
+                            isSelected 
+                            ? 'bg-indigo-600 border-indigo-600 text-white shadow-md scale-105 z-10' 
+                            : 'bg-gray-50 border-transparent text-gray-500 hover:bg-white hover:border-indigo-100'
+                        }`}
+                    >
+                        <span className={`text-[10px] font-bold uppercase ${isSelected ? 'text-indigo-100' : 'text-gray-400'}`}>
+                            {dateStr === getArgentinaDate() ? 'Hoy' : dayName}
+                        </span>
+                        <span className="text-lg font-black leading-tight">{dayNum}</span>
+                        <span className={`text-[10px] font-bold ${isSelected ? 'text-indigo-100' : 'text-gray-400'}`}>{monthName}</span>
+                    </button>
+                );
+            })}
+        </div>
+      </div>
+
+      {/* Tabla de Historial */}
       <div className="bg-white rounded-2xl shadow-md border border-gray-200 overflow-hidden">
         <div className="overflow-x-auto">
           <table className="w-full text-left border-collapse">
             <thead className="bg-gray-100 border-b-2 border-gray-200 text-gray-700">
               <tr>
-                <th className="px-6 py-5 text-xs font-black uppercase tracking-widest">Fecha / Hora</th>
+                <th className="px-6 py-5 text-xs font-black uppercase tracking-widest">Hora</th>
                 <th className="px-6 py-5 text-xs font-black uppercase tracking-widest">Cliente</th>
                 <th className="px-6 py-5 text-xs font-black uppercase tracking-widest">Detalle</th>
                 <th className="px-6 py-5 text-xs font-black uppercase tracking-widest">Método</th>
@@ -362,15 +370,18 @@ const SalesHistoryPage = () => {
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-200">
-              {loading ? <tr><td colSpan="6" className="text-center p-10 text-lg text-gray-400 font-medium">Cargando ventas...</td></tr> : sales.length === 0 ? <tr><td colSpan="6" className="text-center p-12 text-gray-500 text-lg">No se encontraron ventas.</td></tr> : sales.map((sale) => {
+              {loading ? (
+                <tr><td colSpan="6" className="text-center p-10 text-lg text-gray-400 font-medium">Cargando ventas...</td></tr>
+              ) : sales.length === 0 ? (
+                <tr><td colSpan="6" className="text-center p-12 text-gray-500 text-lg">No hay ventas registradas este día.</td></tr>
+              ) : sales.map((sale) => {
                 const canEditThis = canModifySales && online && !sale.__local;
                 const items = sale.sale_items || sale.items || [];
                 
                 return (
                 <tr key={sale.id} className="hover:bg-indigo-50/40 transition-colors">
                   <td className="px-6 py-6 whitespace-nowrap align-top">
-                    <div className="text-base font-bold text-gray-900">{formatDateTime(sale.created_at).split(',')[0]}</div>
-                    <div className="text-sm text-gray-500 font-medium">{formatDateTime(sale.created_at).split(',')[1]}</div>
+                    <div className="text-base font-bold text-gray-900">{formatDateTime(sale.created_at).split(',')[1]}</div>
                   </td>
                   <td className="px-6 py-6 text-base font-bold text-gray-900 align-top">
                     {sale.customer_name || "Cliente General"}
