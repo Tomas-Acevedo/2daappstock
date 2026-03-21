@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { useParams } from 'react-router-dom';
 import { motion } from 'framer-motion';
-import { Wallet, Plus, Calendar, Loader2, Clock, Trash2, Lock, Package, CreditCard, Info, Filter } from 'lucide-react';
+import { Wallet, Plus, Calendar, Loader2, Clock, Trash2, Lock, Package, CreditCard, Info } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { toast } from '@/components/ui/use-toast';
@@ -44,7 +44,7 @@ const CashRegister = () => {
   const [openingBalance, setOpeningBalance] = useState(0);
   const [expenseForm, setExpenseForm] = useState({ amount: 0, description: '', isWithdrawal: false });
   
-  // Nuevo estado para el filtro de egresos
+  // Estado para el filtro de egresos
   const [expenseFilter, setExpenseFilter] = useState('all'); // 'all' | 'expense' | 'withdrawal'
 
   const isOwner = user?.profile?.role === 'owner';
@@ -188,7 +188,7 @@ const CashRegister = () => {
   const totalExpenses = expenses.reduce((acc, exp) => acc + Number(exp.amount), 0);
   const currentTotal = registerData ? (Number(registerData.opening_balance) + totalSales - totalExpenses) : 0;
 
-  // Filtrado lógico de egresos
+  // Filtrado y Cálculo dinámico de egresos según filtro
   const filteredExpenses = useMemo(() => {
     return expenses.filter(exp => {
       const isWithdrawal = exp.description?.startsWith('RETIRO:');
@@ -197,6 +197,10 @@ const CashRegister = () => {
       return true;
     });
   }, [expenses, expenseFilter]);
+
+  const totalExpensesFiltered = useMemo(() => {
+    return filteredExpenses.reduce((acc, exp) => acc + Number(exp.amount), 0);
+  }, [filteredExpenses]);
 
   return (
     <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="max-w-4xl mx-auto pb-10 px-4">
@@ -292,15 +296,20 @@ const CashRegister = () => {
             </div>
           </div>
 
-          {/* TABLA EGRESOS CON FILTRO */}
+          {/* TABLA EGRESOS CON FILTRO DINÁMICO */}
           <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden tabular-nums">
             <div className="p-4 border-b bg-gray-50/50">
               <div className="flex justify-between items-center mb-4">
                 <h3 className="font-semibold text-red-600 text-sm uppercase tracking-wider">Egresos de Caja</h3>
-                <span className="font-bold text-lg">{formatCurrency(totalExpenses)}</span>
+                {/* El total aquí ahora responde al filtro seleccionado */}
+                <div className="flex flex-col items-end">
+                  <span className={`font-bold text-lg transition-colors ${expenseFilter === 'withdrawal' ? 'text-amber-600' : 'text-red-600'}`}>
+                    {formatCurrency(totalExpensesFiltered)}
+                  </span>
+                  {expenseFilter !== 'all' && <span className="text-[9px] font-black uppercase text-gray-400">Total {expenseFilter === 'expense' ? 'Gastos' : 'Retiros'}</span>}
+                </div>
               </div>
               
-              {/* FILTROS DE EGRESO */}
               <div className="flex bg-gray-100 p-1 rounded-lg w-fit">
                 <button 
                   onClick={() => setExpenseFilter('all')}
@@ -361,7 +370,7 @@ const CashRegister = () => {
           <DialogHeader><DialogTitle className="text-xl font-bold">Abrir Caja</DialogTitle></DialogHeader>
           <div className="py-4 space-y-2">
             <label className="text-xs font-black uppercase text-gray-400">Monto Inicial</label>
-            <input type="number" value={openingBalance} onFocus={e => e.target.select()} onChange={(e) => setOpeningBalance(Number(e.target.value))} className="w-full h-12 px-4 rounded-xl text-lg font-bold border border-gray-200 focus:outline-none focus:ring-2 focus:ring-indigo-500" />
+            <Input type="number" value={openingBalance} onFocus={e => e.target.select()} onChange={(e) => setOpeningBalance(Number(e.target.value))} className="h-12 rounded-xl text-lg font-bold" />
           </div>
           <DialogFooter><Button onClick={handleStartRegister} className="w-full h-12 bg-green-600 text-white font-black uppercase text-xs rounded-xl">Iniciar Jornada</Button></DialogFooter>
         </DialogContent>
