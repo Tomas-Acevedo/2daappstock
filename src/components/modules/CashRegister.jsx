@@ -1,7 +1,7 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { useParams } from 'react-router-dom';
 import { motion } from 'framer-motion';
-import { Wallet, Plus, Calendar, Loader2, Clock, Trash2, Lock, Package, CreditCard, Info } from 'lucide-react';
+import { Wallet, Plus, Calendar, Loader2, Clock, Trash2, Lock, Package, CreditCard, Info, Filter } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { toast } from '@/components/ui/use-toast';
@@ -43,6 +43,9 @@ const CashRegister = () => {
   const [isExpenseDialogOpen, setIsExpenseDialogOpen] = useState(false);
   const [openingBalance, setOpeningBalance] = useState(0);
   const [expenseForm, setExpenseForm] = useState({ amount: 0, description: '', isWithdrawal: false });
+  
+  // Nuevo estado para el filtro de egresos
+  const [expenseFilter, setExpenseFilter] = useState('all'); // 'all' | 'expense' | 'withdrawal'
 
   const isOwner = user?.profile?.role === 'owner';
   const canViewHistory = isOwner || branchConfig?.allow_cash_history === true;
@@ -60,7 +63,6 @@ const CashRegister = () => {
     try {
       const { start, end } = getDayRange(selectedDate);
 
-      // 1. Configuración de sucursal
       let config = null;
       if (online) {
         const { data } = await supabase.from('branches').select('allow_cash_history, allow_cash_expense_delete').eq('id', branchId).single();
@@ -70,7 +72,6 @@ const CashRegister = () => {
       }
       setBranchConfig(config);
 
-      // 2. Datos de Caja (Online -> Cache o Offline)
       if (online) {
         const { data: registers } = await supabase.from('cash_registers').select('*').eq('branch_id', branchId).gte('created_at', start).lte('created_at', end).order('created_at', { ascending: false });
         const currentRegister = registers?.[0] || null;
@@ -99,7 +100,6 @@ const CashRegister = () => {
 
   useEffect(() => { fetchRegisterData(); }, [fetchRegisterData]);
 
-  // Listener para refrescar tras sincronización
   useEffect(() => {
     const h = () => fetchRegisterData();
     window.addEventListener("cash:refresh", h);
@@ -187,6 +187,16 @@ const CashRegister = () => {
   const totalSales = cashSales.reduce((acc, sale) => acc + Number(sale.total), 0);
   const totalExpenses = expenses.reduce((acc, exp) => acc + Number(exp.amount), 0);
   const currentTotal = registerData ? (Number(registerData.opening_balance) + totalSales - totalExpenses) : 0;
+
+  // Filtrado lógico de egresos
+  const filteredExpenses = useMemo(() => {
+    return expenses.filter(exp => {
+      const isWithdrawal = exp.description?.startsWith('RETIRO:');
+      if (expenseFilter === 'expense') return !isWithdrawal;
+      if (expenseFilter === 'withdrawal') return isWithdrawal;
+      return true;
+    });
+  }, [expenses, expenseFilter]);
 
   return (
     <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="max-w-4xl mx-auto pb-10 px-4">
@@ -282,31 +292,64 @@ const CashRegister = () => {
             </div>
           </div>
 
-          {/* TABLA EGRESOS */}
+          {/* TABLA EGRESOS CON FILTRO */}
           <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden tabular-nums">
-            <div className="p-4 border-b bg-gray-50/50 flex justify-between items-center">
-              <h3 className="font-semibold text-red-600 text-sm uppercase tracking-wider">Egresos de Caja</h3>
-              <span className="font-bold text-lg">{formatCurrency(totalExpenses)}</span>
+            <div className="p-4 border-b bg-gray-50/50">
+              <div className="flex justify-between items-center mb-4">
+                <h3 className="font-semibold text-red-600 text-sm uppercase tracking-wider">Egresos de Caja</h3>
+                <span className="font-bold text-lg">{formatCurrency(totalExpenses)}</span>
+              </div>
+              
+              {/* FILTROS DE EGRESO */}
+              <div className="flex bg-gray-100 p-1 rounded-lg w-fit">
+                <button 
+                  onClick={() => setExpenseFilter('all')}
+                  className={`px-3 py-1.5 text-[10px] font-black uppercase rounded-md transition-all ${expenseFilter === 'all' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
+                >
+                  Todos
+                </button>
+                <button 
+                  onClick={() => setExpenseFilter('expense')}
+                  className={`px-3 py-1.5 text-[10px] font-black uppercase rounded-md transition-all ${expenseFilter === 'expense' ? 'bg-white text-indigo-600 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
+                >
+                  Gastos
+                </button>
+                <button 
+                  onClick={() => setExpenseFilter('withdrawal')}
+                  className={`px-3 py-1.5 text-[10px] font-black uppercase rounded-md transition-all ${expenseFilter === 'withdrawal' ? 'bg-white text-amber-600 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
+                >
+                  Retiros
+                </button>
+              </div>
             </div>
+
             <div className="divide-y divide-gray-100">
-              {expenses.length === 0 ? (
-                <div className="p-8 text-center text-gray-400">Sin egresos</div>
-              ) : expenses.map(expense => (
-                <div key={expense.id} className="p-4 flex justify-between items-center hover:bg-red-50/30">
-                  <div>
-                    <p className="font-bold text-gray-900">{expense.description}</p>
-                    <p className="text-[11px] text-gray-400 font-medium uppercase">{formatDateTime(expense.created_at).split(',')[1]} hs</p>
+              {filteredExpenses.length === 0 ? (
+                <div className="p-8 text-center text-gray-400">Sin movimientos para este filtro</div>
+              ) : filteredExpenses.map(expense => {
+                const isWithdrawal = expense.description?.startsWith('RETIRO:');
+                return (
+                  <div key={expense.id} className={`p-4 flex justify-between items-center transition-colors ${isWithdrawal ? 'hover:bg-amber-50/30' : 'hover:bg-red-50/30'}`}>
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <p className="font-bold text-gray-900">{expense.description}</p>
+                        {isWithdrawal && <span className="text-[9px] bg-amber-100 text-amber-700 px-1.5 py-0.5 rounded-full font-black uppercase">Retiro</span>}
+                      </div>
+                      <p className="text-[11px] text-gray-400 font-medium uppercase">{formatDateTime(expense.created_at).split(',')[1]} hs</p>
+                    </div>
+                    <div className="flex items-center gap-4">
+                      <span className={`text-lg font-black ${isWithdrawal ? 'text-amber-600' : 'text-red-600'}`}>
+                        -{formatCurrency(expense.amount)}
+                      </span>
+                      {canDeleteExpense ? (
+                        <button onClick={() => handleDeleteExpense(expense.id)} className="p-2 text-gray-300 hover:text-red-600 hover:bg-white rounded-lg border border-transparent hover:border-red-100 transition-all">
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      ) : <div className="p-2 text-gray-300 bg-gray-50 rounded-lg"><Lock className="w-4 h-4" /></div>}
+                    </div>
                   </div>
-                  <div className="flex items-center gap-4">
-                    <span className="text-lg font-black text-red-600">-{formatCurrency(expense.amount)}</span>
-                    {canDeleteExpense ? (
-                      <button onClick={() => handleDeleteExpense(expense.id)} className="p-2 text-gray-300 hover:text-red-600 hover:bg-white rounded-lg border border-transparent hover:border-red-100 transition-all">
-                        <Trash2 className="w-4 h-4" />
-                      </button>
-                    ) : <div className="p-2 text-gray-300 bg-gray-50 rounded-lg"><Lock className="w-4 h-4" /></div>}
-                  </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           </div>
         </div>
@@ -318,7 +361,7 @@ const CashRegister = () => {
           <DialogHeader><DialogTitle className="text-xl font-bold">Abrir Caja</DialogTitle></DialogHeader>
           <div className="py-4 space-y-2">
             <label className="text-xs font-black uppercase text-gray-400">Monto Inicial</label>
-            <Input type="number" value={openingBalance} onFocus={e => e.target.select()} onChange={(e) => setOpeningBalance(Number(e.target.value))} className="h-12 rounded-xl text-lg font-bold" />
+            <input type="number" value={openingBalance} onFocus={e => e.target.select()} onChange={(e) => setOpeningBalance(Number(e.target.value))} className="w-full h-12 px-4 rounded-xl text-lg font-bold border border-gray-200 focus:outline-none focus:ring-2 focus:ring-indigo-500" />
           </div>
           <DialogFooter><Button onClick={handleStartRegister} className="w-full h-12 bg-green-600 text-white font-black uppercase text-xs rounded-xl">Iniciar Jornada</Button></DialogFooter>
         </DialogContent>
