@@ -5,9 +5,8 @@ const AuthContext = createContext(null);
 
 export const AuthProvider = ({ children }) => {
   const [user, setUser] = useState(null);
-
-  const [loading, setLoading] = useState(true);          // sesión
-  const [profileLoading, setProfileLoading] = useState(false); // perfil/rol
+  const [loading, setLoading] = useState(true);
+  const [profileLoading, setProfileLoading] = useState(false);
 
   const fetchProfile = async (authUser) => {
     setProfileLoading(true);
@@ -20,7 +19,6 @@ export const AuthProvider = ({ children }) => {
 
       if (error) {
         console.warn("AuthContext: profile fetch error:", error);
-        // mantenemos el user igual, pero profile queda null
         setUser((prev) => (prev?.id === authUser.id ? { ...prev, profile: null } : prev));
         return null;
       }
@@ -49,8 +47,8 @@ export const AuthProvider = ({ children }) => {
         if (!mounted) return;
 
         if (session?.user) {
+          // Inicialmente ponemos el user; si ya estaba cargado no reseteamos el perfil
           setUser({ ...session.user, profile: null });
-          // 👇 importante: arrancamos profile async, pero sin romper la UI
           fetchProfile(session.user);
         } else {
           setUser(null);
@@ -64,8 +62,17 @@ export const AuthProvider = ({ children }) => {
 
     const { data } = supabase.auth.onAuthStateChange((_event, session) => {
       if (session?.user) {
-        setUser({ ...session.user, profile: null });
-        fetchProfile(session.user);
+        setUser((prev) => {
+          // ✅ Si el usuario es el mismo y ya tenemos su perfil, NO lo ponemos en null
+          // Esto evita que ProtectedRoute desmonte la app al volver a la pestaña
+          if (prev?.id === session.user.id && prev.profile) {
+            return { ...session.user, profile: prev.profile };
+          }
+          
+          // Si es un cambio de usuario o no había perfil, lo buscamos
+          fetchProfile(session.user);
+          return { ...session.user, profile: null };
+        });
       } else {
         setUser(null);
       }
@@ -85,8 +92,7 @@ export const AuthProvider = ({ children }) => {
       if (!data?.user) throw new Error("No user returned from Supabase");
 
       setUser({ ...data.user, profile: null });
-      fetchProfile(data.user);
-
+      await fetchProfile(data.user);
       return data.user;
     } finally {
       setLoading(false);

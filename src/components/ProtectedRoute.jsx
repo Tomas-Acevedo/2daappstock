@@ -6,18 +6,25 @@ const ProtectedRoute = ({ children, requiredRole }) => {
   const { user, loading, profileLoading } = useAuth();
   const location = useLocation();
 
-  // 1) Esperar restaurar sesión (sin pantalla full-screen para evitar "pantallazo" al volver a la pestaña)
+  // 1) Esperar restaurar sesión inicial
   if (loading) return null;
 
   // 2) No logueado
   if (!user) return <Navigate to="/login" replace state={{ from: location }} />;
 
-  // 3) Si requiere rol, esperar profile (sin spinner full-screen)
+  // 3) Si requiere rol específico
   if (requiredRole) {
-    if (profileLoading || !user.profile) return null;
+    // ✅ Si NO tenemos perfil Y todavía se está cargando por primera vez, esperamos.
+    // Si YA tenemos un perfil en memoria, permitimos el paso aunque profileLoading sea true (silent refresh).
+    if (!user.profile && profileLoading) return null;
 
-    if (user.profile.role !== requiredRole) {
-      return <Navigate to="/login" replace />;
+    // Si ya terminó de cargar el perfil y no existe o el rol no coincide
+    if (!user.profile || user.profile.role !== requiredRole) {
+      // Solo redirigimos si definitivamente no hay una carga en curso que pueda darnos el perfil
+      if (!profileLoading) {
+          return <Navigate to="/login" replace />;
+      }
+      return null;
     }
   }
 

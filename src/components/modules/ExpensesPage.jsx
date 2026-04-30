@@ -22,6 +22,7 @@ const ExpensesPage = () => {
     file: null
   });
 
+  // ✅ Volvemos al estado simple: al navegar fuera y volver, se reinicia solo
   const [filters, setFilters] = useState({
     startDate: getArgentinaDate(),
     endDate: getArgentinaDate(),
