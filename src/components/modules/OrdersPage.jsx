@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { useParams } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -501,7 +502,7 @@ const OrdersPage = () => {
           
           ${isRepair ? `
             <div style="border-left:4px solid #94a3b8;background:#f8fafc;padding:14px;border-radius:0 8px 8px 0;clear:both;">
-              <p style="margin:0;font-size:11px;color:#64748b;line-height:1.55;font-style:italic;">Todo equipo que ingrese apagado, sin encender o sin posibilidad de prueba, será recibido sin verificación funcional previa. CELUX no se responsabiliza por fallas preexistentes que puedan manifestarse luego de la reparación.</p>
+              <p style="margin:0;font-size:11px;color:#64748b;line-height:1.55;font-style:italic;">El equipo debe retirarse dentro de los 7 días corridos tras la notificación para evitar modificaciones en el presupuesto o recargos por demora. Si ingresa apagado o sin posibilidad de prueba, se recibe sin verificación funcional previa y el local no se responsabiliza por fallas preexistentes que se manifiesten luego de la reparación.</p>
             </div>
           ` : ''}
         </div>
