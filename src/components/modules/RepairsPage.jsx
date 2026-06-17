@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useParams } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { 
@@ -18,6 +18,9 @@ const RepairsPage = () => {
   const [paymentMethods, setPaymentMethods] = useState([]);
   const [isEditing, setIsEditing] = useState(null);
 
+  // ✅ Referencia para hacer scroll exacto al formulario
+  const formRef = useRef(null);
+
   // Estados para métricas globales del período completo
   const [globalMetrics, setGlobalMetrics] = useState({
     totalInvoiced: 0,
@@ -25,7 +28,7 @@ const RepairsPage = () => {
     totalGain: 0
   });
 
-  // Estados para la paginación (2 reparaciones por página)
+  // Estados para la paginación (15 reparaciones por página de acuerdo a tu setting original)
   const [page, setPage] = useState(0);
   const [hasMore, setHasMore] = useState(true);
   const pageSize = 15;
@@ -117,7 +120,7 @@ const RepairsPage = () => {
         .order('created_at', { ascending: false })
         .range(rangeStart, rangeEnd);
 
-      // 2. QUERY GLOBAL (Solo trae precio y costo para calcular las métricas sin gastar recursos de más)
+      // 2. QUERY GLOBAL
       let metricsQuery = supabase
         .from('repairs')
         .select('price, cost')
@@ -134,13 +137,11 @@ const RepairsPage = () => {
         metricsQuery = metricsQuery.eq('payment_method', filters.paymentMethod);
       }
 
-      // Ejecutamos ambas en paralelo para máxima velocidad
       const [tableRes, metricsRes] = await Promise.all([tableQuery, metricsQuery]);
 
       if (tableRes.error) throw tableRes.error;
       if (metricsRes.error) throw metricsRes.error;
 
-      // Procesar paginación de la tabla
       const rows = tableRes.data || [];
       if (rows.length > pageSize) {
         setHasMore(true);
@@ -150,7 +151,6 @@ const RepairsPage = () => {
         setRepairs(rows);
       }
 
-      // ✅ Procesar métricas GLOBALES del período completo filtrado
       const allRowsForMetrics = metricsRes.data || [];
       const totalInvoiced = allRowsForMetrics.reduce((sum, r) => sum + Number(r.price || 0), 0);
       const totalCost = allRowsForMetrics.reduce((sum, r) => sum + Number(r.cost || 0), 0);
@@ -263,7 +263,11 @@ const RepairsPage = () => {
       notes: repair.notes || '',
       date: cleanDate
     });
-    window.scrollTo({ top: 0, behavior: 'smooth' });
+
+    // ✅ Hace scroll suave exacto hasta la posición del formulario
+    if (formRef.current) {
+      formRef.current.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
   };
 
   const handleDelete = async (id) => {
@@ -305,7 +309,8 @@ const RepairsPage = () => {
       </div>
 
       {/* Formulario de Ingreso y Modificación */}
-      <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
+      {/* ✅ Agregada la referencia formRef acá */}
+      <div ref={formRef} className="bg-white rounded-xl shadow-sm border border-gray-200 p-6 scroll-mt-6">
         <h3 className="text-sm font-bold text-gray-700 uppercase mb-4 flex items-center gap-2">
           {isEditing ? <Edit3 className="w-4 h-4 text-blue-500" /> : <Plus className="w-4 h-4 text-green-500" />}
           {isEditing ? "Modificar Reparación" : "Ingresar Nueva Reparación"}
@@ -500,7 +505,7 @@ const RepairsPage = () => {
         </div>
       </div>
 
-      {/* ✅ Métricas de Cierre Globales de todo el período filtrado */}
+      {/* Métricas de Cierre Globales de todo el período filtrado */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         <div className="bg-indigo-50 border border-indigo-100 rounded-xl p-5 shadow-sm">
           <div className="text-indigo-800 font-semibold text-xs uppercase tracking-wider mb-1">Presupuestado Total del Período</div>
