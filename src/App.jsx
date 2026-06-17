@@ -11,6 +11,7 @@ import LoginPage from "@/pages/LoginPage";
 import PostLoginRedirect from "@/pages/PostLoginRedirect";
 import OwnerDashboard from "@/pages/OwnerDashboard";
 import BranchDashboard from "@/pages/BranchDashboard";
+import RepairsPage from "@/components/modules/RepairsPage"; // ✅ Importación de la nueva página de Reparaciones
 import ScanProvider from "@/scan/ScanProvider";
 import GlobalScanListener from "@/scan/GlobalScanListener";
 import ScanDialog from "@/scan/ScanDialog";
@@ -47,6 +48,11 @@ function App() {
                 }
               />
 
+              {/* Las rutas internas específicas de la sucursal se resuelven dentro de BranchDashboard 
+                gracias al comodín "/*". Sin embargo, si necesitas declarar subrutas explícitas 
+                o si BranchDashboard contiene un `<Routes>` interno, asegúrate de mapear 
+                la URL "/repairs" allí adentro apuntando a <RepairsPage />.
+              */}
               <Route
                 path="/branch/:branchId/*"
                 element={

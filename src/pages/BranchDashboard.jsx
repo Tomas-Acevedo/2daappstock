@@ -13,7 +13,8 @@ import ExpensesPage from '@/components/modules/ExpensesPage';
 import SalesHistoryPage from '@/components/modules/SalesHistoryPage';
 import OrdersPage from '@/components/modules/OrdersPage';
 import ConfigurationPage from '@/components/modules/ConfigurationPage';
-import JornadasPage from '@/components/modules/JornadasPage'; // ✅ Importación de la nueva página
+import JornadasPage from '@/components/modules/JornadasPage';
+import RepairsPage from '@/components/modules//RepairsPage'; // ✅ Importación de la nueva página de Reparaciones
 import ProtectedRoute from '@/components/ProtectedRoute';
 
 const BranchDashboard = () => {
@@ -60,28 +61,30 @@ const BranchDashboard = () => {
         <main className="flex-1 overflow-y-auto w-full p-4 lg:p-6 pb-20 lg:pb-6">
           <div className="max-w-7xl mx-auto space-y-6">
             <Routes>
-              <Route path="/" element={<DashboardHome />} />
-              <Route path="/sales" element={<SalesModule />} />
-              <Route path="/sales-history" element={<SalesHistoryPage />} />
-              <Route path="/orders" element={<OrdersPage />} />
-              <Route path="/inventory" element={<InventoryModule />} />
-              <Route path="/caja" element={<CashRegister />} />
-              <Route path="/reports" element={<ReportsModule />} />
+              {/* 🛠 CORRECCIÓN CRÍTICA: Se quitaron las "/" iniciales para que las rutas hijas funcionen de forma relativa */}
+              <Route path="" element={<DashboardHome />} />
+              <Route path="sales" element={<SalesModule />} />
+              <Route path="sales-history" element={<SalesHistoryPage />} />
+              <Route path="orders" element={<OrdersPage />} />
+              <Route path="inventory" element={<InventoryModule />} />
+              <Route path="caja" element={<CashRegister />} />
+              <Route path="reports" element={<ReportsModule />} />
+              <Route path="jornadas" element={<JornadasPage />} />
               
-              {/* ✅ Nueva Ruta de Jornadas */}
-              <Route path="/jornadas" element={<JornadasPage />} />
+              {/* ✅ Nueva Ruta de Reparaciones */}
+              <Route path="repairs" element={<RepairsPage />} />
 
               {/* Owner Only Routes */}
               <Route 
-                path="/logs" 
+                path="logs" 
                 element={
                   <ProtectedRoute requiredRole="owner">
                     <LogsPage />
                   </ProtectedRoute>
                 } 
               />
-               <Route 
-                path="/expenses" 
+              <Route 
+                path="expenses" 
                 element={
                   <ProtectedRoute requiredRole="owner">
                     <ExpensesPage />
@@ -89,7 +92,7 @@ const BranchDashboard = () => {
                 } 
               />
               <Route 
-                path="/configuration" 
+                path="configuration" 
                 element={
                   <ProtectedRoute requiredRole="owner">
                     <ConfigurationPage />

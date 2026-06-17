@@ -12,6 +12,7 @@ import {
   X,
   ClipboardList,
   Clock,
+  Wrench, // ✅ Importación del ícono para Reparaciones
 } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
 import { useOffline } from "@/contexts/OfflineContext";
@@ -109,6 +110,7 @@ const Sidebar = ({ onClose }) => {
             { icon: LayoutDashboard, label: "Estadísticas", path: "" },
             { icon: ShoppingCart, label: "Ventas", path: "sales" },
             { icon: ClipboardList, label: "Pedidos", path: "orders" },
+            { icon: Wrench, label: "Reparaciones", path: "repairs" }, // ✅ Agregado para el Owner
             { icon: Package, label: "Productos", path: "inventory" },
             { icon: Wallet, label: "Caja", path: "caja" },
             { icon: Banknote, label: "Gastos", path: "expenses" },
@@ -118,6 +120,7 @@ const Sidebar = ({ onClose }) => {
         : [
             { icon: ShoppingCart, label: "Ventas", path: "sales" },
             { icon: ClipboardList, label: "Pedidos", path: "orders" },
+            { icon: Wrench, label: "Reparaciones", path: "repairs" }, // ✅ Agregado para el Empleado
             { icon: Package, label: "Productos", path: "inventory" },
             { icon: Wallet, label: "Caja", path: "caja" },
           ];
