@@ -62,6 +62,14 @@ export default function ScanDialog() {
 
   useEffect(() => {
     if (!isOpen) return;
+    
+    // Limpiar campos del formulario de nuevo producto cada vez que cambia el código de barras o se abre el diálogo
+    setNewName("");
+    setNewPrice(0);
+    setNewStock(0);
+    setNewCategoryId("");
+    setSearch("");
+
     if (matches?.length === 1) {
       const p = matches[0];
       setViewProduct(p);
@@ -73,7 +81,7 @@ export default function ScanDialog() {
     } else {
       setViewProduct(null);
     }
-  }, [isOpen, matches]);
+  }, [isOpen, matches, barcode]);
 
   useEffect(() => {
     if (isOpen && branchId) fetchInitialData();
@@ -114,6 +122,11 @@ export default function ScanDialog() {
     setViewProduct(null);
     setCustomName("");
     setCustomPrice("");
+    setNewName("");
+    setNewPrice(0);
+    setNewStock(0);
+    setNewCategoryId("");
+    setSearch("");
   };
 
   const subtotal = useMemo(() => cart.reduce((acc, it) => acc + (it.price * it.quantity), 0), [cart]);
