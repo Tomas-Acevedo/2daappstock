@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
   Search, ShoppingCart, Trash2, Plus, Minus,
-  Loader2, Tag, ChevronLeft, ChevronRight, Edit3, User, CheckCircle2, Settings2
+  Loader2, Tag, ChevronLeft, ChevronRight, Edit3, User, CheckCircle2, Settings2, Barcode
 } from 'lucide-react';
 import { supabase } from '@/lib/customSupabaseClient';
 import { toast } from '@/components/ui/use-toast';
@@ -39,6 +39,10 @@ const SalesModule = () => {
   const { branchId } = useParams();
   const { online, refreshPending } = useOffline();
   
+  // --- CONFIGURACIÓN DE VISIBILIDAD (TRUE / FALSE) ---
+  const SHOW_CUSTOMER_INPUT = false;
+  const SHOW_RECEIPT_OPTION = false;
+
   const [activeTab, setActiveTab] = useState("new-sale");
   const [products, setProducts] = useState([]);
   const [categories, setCategories] = useState([]);
@@ -130,7 +134,9 @@ const SalesModule = () => {
         const from = (currentPage - 1) * itemsPerPage;
         const to = from + itemsPerPage - 1;
         let query = supabase.from("products").select("*, categories(name)", { count: "exact" }).eq("branch_id", branchId).order("name", { ascending: true }).range(from, to);
-        if (searchTerm) query = query.ilike("name", `%${searchTerm}%`);
+        if (searchTerm) {
+          query = query.or(`name.ilike.%${searchTerm}%,barcode.ilike.%${searchTerm}%`);
+        }
         if (selectedCategory !== "all") query = query.eq("category_id", selectedCategory);
         const { data, count, error } = await query;
         if (error) throw error;
@@ -141,7 +147,7 @@ const SalesModule = () => {
         let cached = await getProductsByBranch(branchId);
         if (searchTerm) {
           const s = searchTerm.toLowerCase();
-          cached = cached.filter(p => (p.name || "").toLowerCase().includes(s));
+          cached = cached.filter(p => (p.name || "").toLowerCase().includes(s) || (p.barcode || "").toLowerCase().includes(s));
         }
         if (selectedCategory !== "all") {
           cached = cached.filter(p => p.category_id === selectedCategory);
@@ -172,7 +178,6 @@ const SalesModule = () => {
   // --- LOGICA DE SELECCION ---
   const handleMethodSelection = (method) => {
     setSelectedPaymentMethod(method);
-    // IMPORTANTE: Al seleccionar un método nuevo, reseteamos la cuota a null
     setSelectedInstallment(null); 
     
     if (method.installments && method.installments.length > 0) {
@@ -183,7 +188,7 @@ const SalesModule = () => {
   };
 
   // --- CALCULOS DE VENTA ---
-  const subtotal = cart.reduce((acc, item) => acc + (item.price * (item.quantity || 0)), 0);
+  const subtotal = (cart || []).reduce((acc, item) => acc + (item.price * (item.quantity || 0)), 0);
   
   let adjustmentPercent = 0;
   if (selectedInstallment) {
@@ -244,7 +249,6 @@ const SalesModule = () => {
 
   // --- CHECKOUT ---
   const handleCheckout = async () => {
-    // Verificamos que si el método tiene cuotas, se haya seleccionado una manualmente
     const hasInstallments = selectedPaymentMethod?.installments?.length > 0;
     if (cart.length === 0 || !selectedPaymentMethod || (hasInstallments && !selectedInstallment)) {
         toast({ 
@@ -257,7 +261,9 @@ const SalesModule = () => {
     setIsProcessing(true);
 
     try {
-      const safeCustomerName = (customerName || "").trim() || "Cliente General";
+      const safeCustomerName = SHOW_CUSTOMER_INPUT ? ((customerName || "").trim() || "Cliente General") : "Cliente General";
+      const finalNeedsReceipt = SHOW_RECEIPT_OPTION ? needsReceipt : 'no';
+
       const finalMethodName = selectedInstallment 
         ? `${selectedPaymentMethod.name} (${selectedInstallment.quantity} cuotas)` 
         : selectedPaymentMethod.name;
@@ -278,14 +284,14 @@ const SalesModule = () => {
         await saveLocalSale(localSale, localItems);
         await enqueueAction({
           type: "sale:create",
-          payload: { localSaleId, branch_id: branchId, customer_name: safeCustomerName, total, payment_method: finalMethodName, items: localItems, needsReceipt }
+          payload: { localSaleId, branch_id: branchId, customer_name: safeCustomerName, total, payment_method: finalMethodName, items: localItems, needsReceipt: finalNeedsReceipt }
         });
 
         const stockPayload = cart.filter(i => !i.is_custom).map(i => ({ product_id: i.id, quantity: i.quantity }));
         if (stockPayload.length) await decrementLocalStock(stockPayload);
 
         toast({ title: "Venta guardada (offline)" });
-        if (needsReceipt === "yes") generateSalePDF(localSale, cart);
+        if (SHOW_RECEIPT_OPTION && finalNeedsReceipt === "yes") generateSalePDF(localSale, cart);
       } else {
         const { data: sale, error: saleError } = await supabase.from("sales").insert([{ branch_id: branchId, customer_name: safeCustomerName, total, payment_method: finalMethodName }]).select().single();
         if (saleError) throw saleError;
@@ -299,11 +305,14 @@ const SalesModule = () => {
         }
 
         toast({ title: "Venta realizada con éxito" });
-        if (needsReceipt === "yes") generateSalePDF(sale, cart);
+        if (SHOW_RECEIPT_OPTION && finalNeedsReceipt === "yes") generateSalePDF(sale, cart);
       }
 
-      setCustomerName(""); setCart([]); setNeedsReceipt('no');
-      setSelectedPaymentMethod(null); setSelectedInstallment(null);
+      setCustomerName(""); 
+      setCart([]); 
+      setNeedsReceipt('no');
+      setSelectedPaymentMethod(null); 
+      setSelectedInstallment(null);
       await fetchProducts();
     } catch (error) {
       toast({ title: "Error al procesar", variant: "destructive" });
@@ -425,7 +434,7 @@ const SalesModule = () => {
               <div className="p-3 md:p-4 border-b border-gray-100 bg-gray-50/50 space-y-3">
                 <div className="relative">
                   <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
-                  <Input placeholder="Buscar productos..." className="pl-9 bg-white" value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} />
+                  <Input placeholder="Buscar por nombre o código de barra..." className="pl-9 bg-white" value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} />
                 </div>
                 <div className="flex gap-2 overflow-x-auto pb-1 scrollbar-hide">
                   <Button variant={selectedCategory === 'all' ? "default" : "outline"} size="sm" onClick={() => setSelectedCategory('all')} className="rounded-full whitespace-nowrap">Todos</Button>
@@ -452,6 +461,10 @@ const SalesModule = () => {
                             </span>
                           </div>
                           <h3 className="text-xs md:text-sm font-medium text-gray-900 line-clamp-2 h-8 md:h-10 mb-1">{product.name}</h3>
+                          <div className="flex items-center gap-1 text-[11px] text-gray-400 mb-1">
+                            <Barcode className="w-3.5 h-3.5 shrink-0" />
+                            <span className="truncate">{product.barcode || 'Sin código'}</span>
+                          </div>
                           <p className="text-sm md:text-lg font-bold text-indigo-600">{formatCurrency(product.price)}</p>
                         </CardContent>
                       </Card>
@@ -525,18 +538,22 @@ const SalesModule = () => {
                 </div>
 
                 <div className="p-4 space-y-4">
-                  <div className="space-y-2">
-                    <label className="text-[10px] font-bold text-gray-500 uppercase tracking-wider flex items-center gap-1"><User className="w-3 h-3" /> Cliente (opcional)</label>
-                    <Input placeholder="Nombre del cliente..." className="h-9 text-xs bg-white" value={customerName} onChange={(e) => setCustomerName(e.target.value)} />
-                  </div>
+                  {SHOW_CUSTOMER_INPUT && (
+                    <div className="space-y-2">
+                      <label className="text-[10px] font-bold text-gray-500 uppercase tracking-wider flex items-center gap-1"><User className="w-3 h-3" /> Cliente (opcional)</label>
+                      <Input placeholder="Nombre del cliente..." className="h-9 text-xs bg-white" value={customerName} onChange={(e) => setCustomerName(e.target.value)} />
+                    </div>
+                  )}
 
-                  <div className="space-y-2">
-                    <label className="text-[10px] font-bold text-gray-500 uppercase tracking-wider">¿Generar Comprobante PDF?</label>
-                    <select className="flex h-10 w-full rounded-xl border border-input bg-white px-3 py-2 text-xs font-bold focus:ring-2 focus:ring-indigo-500" value={needsReceipt} onChange={e => setNeedsReceipt(e.target.value)}>
-                      <option value="no">No, solo registrar</option>
-                      <option value="yes">Sí, generar y abrir PDF</option>
-                    </select>
-                  </div>
+                  {SHOW_RECEIPT_OPTION && (
+                    <div className="space-y-2">
+                      <label className="text-[10px] font-bold text-gray-500 uppercase tracking-wider">¿Generar Comprobante PDF?</label>
+                      <select className="flex h-10 w-full rounded-xl border border-input bg-white px-3 py-2 text-xs font-bold focus:ring-2 focus:ring-indigo-500" value={needsReceipt} onChange={e => setNeedsReceipt(e.target.value)}>
+                        <option value="no">No, solo registrar</option>
+                        <option value="yes">Sí, generar y abrir PDF</option>
+                      </select>
+                    </div>
+                  )}
 
                   <div className="space-y-2">
                     <div className="flex justify-between items-end">
