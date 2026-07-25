@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { useParams } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Wallet, Plus, Calendar, Loader2, Clock, Trash2, Lock, CreditCard, Info, ArrowRight } from 'lucide-react';
+import { Wallet, Plus, Calendar, Loader2, Clock, Trash2, Lock, CreditCard, Info, ArrowRight, Pencil } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { toast } from '@/components/ui/use-toast';
@@ -48,6 +48,11 @@ const CashRegister = () => {
   const [expenseForm, setExpenseForm] = useState({ amount: 0, description: '', isWithdrawal: false });
   const [expenseFilter, setExpenseFilter] = useState('all'); 
 
+  // Control para editar el monto inicial 1 sola vez
+  const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
+  const [newOpeningBalance, setNewOpeningBalance] = useState(0);
+  const [hasEditedOpening, setHasEditedOpening] = useState(false);
+
   const isOwner = user?.profile?.role === 'owner';
   const canViewHistory = isOwner || branchConfig?.allow_cash_history === true;
 
@@ -65,7 +70,7 @@ const CashRegister = () => {
 
   const fetchRegisterData = useCallback(async () => {
     if (!branchId) return;
-    setLoading(true); // Activar carga al iniciar
+    setLoading(true);
     try {
       const { start, end } = getRangeQuery(effectiveStartDate, effectiveEndDate);
 
@@ -86,7 +91,16 @@ const CashRegister = () => {
           .lte('created_at', end)
           .order('created_at', { ascending: false });
         
-        setRegisterData(registers?.[0] || null);
+        const currentRegister = registers?.[0] || null;
+        setRegisterData(currentRegister);
+        
+        // Verificamos mediante sessionStorage o si el registro fue marcado localmente
+        const editedKey = `edited_opening_${currentRegister?.id}`;
+        if (currentRegister && sessionStorage.getItem(editedKey) === 'true') {
+          setHasEditedOpening(true);
+        } else {
+          setHasEditedOpening(false);
+        }
 
         const { data: sales } = await supabase.from('sales')
           .select('*, sale_items(*)')
@@ -110,11 +124,15 @@ const CashRegister = () => {
         setRegisterData(offData.register);
         setExpenses(offData.expenses);
         setCashSales(offData.cashSales);
+        const editedKey = `edited_opening_${offData.register?.id}`;
+        if (offData.register && sessionStorage.getItem(editedKey) === 'true') {
+          setHasEditedOpening(true);
+        }
       }
     } catch (error) {
       console.error(error);
     } finally {
-      setLoading(false); // Finalizar carga
+      setLoading(false);
     }
   }, [branchId, effectiveStartDate, effectiveEndDate, online]);
 
@@ -133,8 +151,47 @@ const CashRegister = () => {
         await upsertLocalCashRegister({ id: localId, ...payload });
         await enqueueAction({ type: "cash_register:create", payload: { ...payload, _local_id: localId } });
       }
-      setIsStartDialogOpen(false); fetchRegisterData();
+      setIsStartDialogOpen(false); 
+      setHasEditedOpening(false);
+      fetchRegisterData();
     } catch (e) { toast({ title: "Error", variant: "destructive" }); }
+  };
+
+  const handleEditOpeningBalance = async () => {
+    if (hasEditedOpening) {
+      toast({ title: "Acción no permitida", description: "El monto inicial ya fue modificado una vez.", variant: "destructive" });
+      return;
+    }
+    if (!registerData) return;
+
+    try {
+      const updatedPayload = { 
+        ...registerData, 
+        opening_balance: newOpeningBalance 
+      };
+
+      if (online) {
+        const { error } = await supabase
+          .from('cash_registers')
+          .update({ opening_balance: newOpeningBalance })
+          .eq('id', registerData.id);
+        if (error) throw error;
+        await upsertLocalCashRegister(updatedPayload);
+      } else {
+        await upsertLocalCashRegister(updatedPayload);
+        await enqueueAction({ type: "cash_register:update", payload: updatedPayload });
+      }
+
+      // Guardamos en sessionStorage para bloquear ediciones futuras en esta sesión/caja
+      sessionStorage.setItem(`edited_opening_${registerData.id}`, 'true');
+
+      setHasEditedOpening(true);
+      setRegisterData(updatedPayload);
+      setIsEditDialogOpen(false);
+      toast({ title: "Monto inicial actualizado con éxito" });
+    } catch (e) {
+      toast({ title: "Error al actualizar", variant: "destructive" });
+    }
   };
 
   const handleAddExpense = async () => {
@@ -241,8 +298,23 @@ const CashRegister = () => {
                     </div>
                   </div>
                   <div className="flex flex-col gap-2 bg-gray-50 p-4 rounded-xl border border-gray-100 min-w-[240px]">
-                    <div className="text-sm flex justify-between">
-                      <span>Inicio:</span><span className="font-bold">{formatCurrency(registerData?.opening_balance || 0)}</span>
+                    <div className="text-sm flex justify-between items-center">
+                      <span>Inicio:</span>
+                      <div className="flex items-center gap-2">
+                        <span className="font-bold">{formatCurrency(registerData?.opening_balance || 0)}</span>
+                        {effectiveStartDate === getArgentinaDate() && !hasEditedOpening && registerData && (
+                          <button 
+                            onClick={() => {
+                              setNewOpeningBalance(registerData.opening_balance);
+                              setIsEditDialogOpen(true);
+                            }}
+                            className="p-1 text-gray-400 hover:text-indigo-600 transition-colors"
+                            title="Editar monto inicial (1 sola vez)"
+                          >
+                            <Pencil className="w-3.5 h-3.5" />
+                          </button>
+                        )}
+                      </div>
                     </div>
                     <div className="text-xs pt-2 border-t flex justify-between uppercase">
                       <span>Apertura:</span><span>{registerData ? formatDateTime(registerData.created_at).split(',')[1] : '--:--'}</span>
@@ -343,6 +415,19 @@ const CashRegister = () => {
             <Input type="number" value={openingBalance} onFocus={e => e.target.select()} onChange={(e) => setOpeningBalance(Number(e.target.value))} className="h-12 rounded-xl text-lg font-bold" />
           </div>
           <DialogFooter><Button onClick={handleStartRegister} className="w-full h-12 bg-green-600 text-white font-black uppercase text-xs rounded-xl">Iniciar Jornada</Button></DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* DIALOG PARA EDITAR MONTO INICIAL 1 SOLA VEZ */}
+      <Dialog open={isEditDialogOpen} onOpenChange={setIsEditDialogOpen}>
+        <DialogContent className="bg-white rounded-2xl">
+          <DialogHeader><DialogTitle className="text-xl font-bold">Modificar Monto Inicial</DialogTitle></DialogHeader>
+          <div className="py-4 space-y-2">
+            <p className="text-xs text-amber-600 font-semibold mb-2">⚠️ Advertencia: Solo puedes realizar esta modificación una única vez.</p>
+            <label className="text-xs font-black uppercase text-gray-400">Nuevo Monto Inicial</label>
+            <Input type="number" value={newOpeningBalance} onFocus={e => e.target.select()} onChange={(e) => setNewOpeningBalance(Number(e.target.value))} className="h-12 rounded-xl text-lg font-bold" />
+          </div>
+          <DialogFooter><Button onClick={handleEditOpeningBalance} className="w-full h-12 bg-indigo-600 text-white font-black uppercase text-xs rounded-xl">Guardar Cambios</Button></DialogFooter>
         </DialogContent>
       </Dialog>
 
