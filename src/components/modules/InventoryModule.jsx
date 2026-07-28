@@ -3,7 +3,7 @@ import { useParams } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import {
   Package, Plus, Search, Trash2, Edit, ShieldCheck,
-  Loader2, Layers, ChevronLeft, ChevronRight, Filter, CloudOff
+  Loader2, Layers, ChevronLeft, ChevronRight, Filter, CloudOff, Barcode
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -24,7 +24,7 @@ import { useOffline } from "@/contexts/OfflineContext";
 import {
   cacheProducts,
   cacheCategories,
-  cacheBranches,      // ✅ Agregado
+  cacheBranches,
   getProductsByBranch,
   getCategoriesByBranch,
   getBranchById,
@@ -55,8 +55,13 @@ const InventoryModule = () => {
   const [editingItem, setEditingItem] = useState(null);
 
   const [productForm, setProductForm] = useState({
-    name: '', category_id: '', price: 0, stock: 0, barcode: ''
+    name: '', category_id: '', price: 0, stock: 0
   });
+  
+  const [productBarcodes, setProductBarcodes] = useState([]);
+  const [tempBarcodes, setTempBarcodes] = useState([]);
+  const [newBarcodeEntry, setNewBarcodeEntry] = useState('');
+
   const [categoryForm, setCategoryForm] = useState({ name: '' });
 
   const isOwner = user?.profile?.role === 'owner';
@@ -71,9 +76,6 @@ const InventoryModule = () => {
     return Number((str || "").replace(/\./g, ""));
   };
 
-  // =========================
-  // FETCH CATEGORIES
-  // =========================
   const fetchCategories = useCallback(async () => {
     if (!branchId) return;
     try {
@@ -97,9 +99,6 @@ const InventoryModule = () => {
     }
   }, [branchId, online]);
 
-  // =========================
-  // FETCH PRODUCTS
-  // =========================
   const fetchProducts = useCallback(async () => {
     if (!branchId || activeTab !== "products") return;
     setLoading(true);
@@ -111,13 +110,24 @@ const InventoryModule = () => {
 
         let query = supabase
           .from("products")
-          .select("*", { count: "exact" })
+          .select("*, product_barcodes(*)", { count: "exact" })
           .eq("branch_id", branchId)
           .order("name", { ascending: true })
           .range(from, to);
 
         if (filter) {
-          query = query.or(`name.ilike.%${filter}%,barcode.ilike.%${filter}%`);
+          const { data: matchingBarcodes } = await supabase
+            .from("product_barcodes")
+            .select("product_id")
+            .ilike("barcode", `%${filter}%`);
+          
+          const matchedProductIds = (matchingBarcodes || []).map(b => b.product_id);
+
+          if (matchedProductIds.length > 0) {
+            query = query.or(`name.ilike.%${filter}%,id.in.(${matchedProductIds.join(',')})`);
+          } else {
+            query = query.ilike("name", `%${filter}%`);
+          }
         }
 
         if (categoryFilter !== "all") query = query.eq("category_id", categoryFilter);
@@ -137,7 +147,7 @@ const InventoryModule = () => {
           const f = filter.toLowerCase();
           cached = cached.filter(p =>
             p.name.toLowerCase().includes(f) ||
-            (p.barcode || "").includes(f)
+            (p.product_barcodes || []).some(b => b.barcode.toLowerCase().includes(f))
           );
         }
 
@@ -160,9 +170,18 @@ const InventoryModule = () => {
     }
   }, [branchId, online, activeTab, currentPage, filter, categoryFilter, stockFilter]);
 
-  // =========================
-  // INIT
-  // =========================
+  const fetchProductBarcodes = async (productId) => {
+    if (online && productId) {
+      const { data } = await supabase.from("product_barcodes").select("*").eq("product_id", productId);
+      const list = data || [];
+      setProductBarcodes(list);
+      setTempBarcodes(list);
+    } else {
+      setProductBarcodes([]);
+      setTempBarcodes([]);
+    }
+  };
+
   useEffect(() => {
     const loadInitialData = async () => {
       try {
@@ -175,7 +194,7 @@ const InventoryModule = () => {
 
           if (!error && data) {
             setBranchConfig(data);
-            await cacheBranches([data]); // ✅ Cacheado para permisos offline
+            await cacheBranches([data]);
           }
         } else {
           const cached = await getBranchById(branchId);
@@ -195,56 +214,38 @@ const InventoryModule = () => {
     fetchProducts();
   }, [fetchProducts]);
 
+  // Oyente optimizado y blindado para el evento global de actualización
   useEffect(() => {
-    const handleRefresh = async () => {
-      try {
-        if (navigator.onLine && branchId) {
-          const { data, error } = await supabase
-            .from("branches")
-            .select("id, allow_stock_edit")
-            .eq("id", branchId)
-            .single();
-
-          if (!error && data) {
-            setBranchConfig(data);
-            await cacheBranches([data]);
-          }
-        } else if (branchId) {
-          const cached = await getBranchById(branchId);
-          if (cached) setBranchConfig(cached);
-        }
-      } catch (_) {}
-
+    const handleRefresh = () => {
       fetchProducts();
       fetchCategories();
     };
 
     window.addEventListener("inventory:refresh", handleRefresh);
     return () => window.removeEventListener("inventory:refresh", handleRefresh);
-  }, [branchId, fetchProducts, fetchCategories]);
+  }, [fetchProducts, fetchCategories]);
 
-  // =========================
-  // ACTIONS: PRODUCTS
-  // =========================
   const openProductDialog = (product = null) => {
+    setNewBarcodeEntry('');
     if (product) {
       setEditingItem(product);
       setProductForm({
         name: product.name,
         category_id: product.category_id,
         price: product.price,
-        stock: product.stock,
-        barcode: product.barcode || ''
+        stock: product.stock
       });
+      fetchProductBarcodes(product.id);
     } else {
       setEditingItem(null);
       setProductForm({
         name: '',
         category_id: categories[0]?.id || '',
         price: 0,
-        stock: 0,
-        barcode: ''
+        stock: 0
       });
+      setProductBarcodes([]);
+      setTempBarcodes([]);
     }
     setIsProductDialogOpen(true);
   };
@@ -274,18 +275,45 @@ const InventoryModule = () => {
       return;
     }
 
-    const { error } = editingItem
-      ? await supabase.from("products").update(payload).eq("id", editingItem.id)
-      : await supabase.from("products").insert([payload]);
+    let productId = editingItem?.id;
 
-    if (error) {
-      toast({ title: "Error al guardar", variant: "destructive" });
-      return;
+    if (editingItem) {
+      const { error } = await supabase.from("products").update(payload).eq("id", editingItem.id);
+      if (error) {
+        toast({ title: "Error al actualizar", variant: "destructive" });
+        return;
+      }
+    } else {
+      const { data, error } = await supabase.from("products").insert([payload]).select().single();
+      if (error || !data) {
+        toast({ title: "Error al crear", variant: "destructive" });
+        return;
+      }
+      productId = data.id;
+    }
+
+    if (productId && online) {
+      const currentIds = tempBarcodes.map(b => b.id).filter(Boolean);
+      const toDelete = productBarcodes.filter(b => !currentIds.includes(b.id));
+
+      for (const item of toDelete) {
+        if (item.id) {
+          await supabase.from("product_barcodes").delete().eq("id", item.id);
+        }
+      }
+
+      const toInsert = tempBarcodes.filter(b => !b.id);
+      for (const item of toInsert) {
+        await supabase.from("product_barcodes").insert([{
+          product_id: productId,
+          barcode: item.barcode
+        }]);
+      }
     }
 
     toast({ title: "Inventario actualizado" });
     setIsProductDialogOpen(false);
-    fetchProducts();
+    window.dispatchEvent(new Event('inventory:refresh'));
   };
 
   const handleDeleteProduct = async (id) => {
@@ -312,12 +340,30 @@ const InventoryModule = () => {
     }
 
     toast({ title: "Producto eliminado" });
-    fetchProducts();
+    window.dispatchEvent(new Event('inventory:refresh'));
   };
 
-  // =========================
-  // ACTIONS: CATEGORIES
-  // =========================
+  const handleAddTempBarcode = () => {
+    if (!newBarcodeEntry.trim()) return;
+    if (tempBarcodes.length >= 5) {
+      toast({ title: "Límite alcanzado", description: "Máximo 5 códigos de barra por producto.", variant: "destructive" });
+      return;
+    }
+
+    const exists = tempBarcodes.some(b => b.barcode === newBarcodeEntry.trim());
+    if (exists) {
+      toast({ title: "Duplicado", description: "Este código ya está en la lista.", variant: "destructive" });
+      return;
+    }
+
+    setTempBarcodes(prev => [...prev, { barcode: newBarcodeEntry.trim() }]);
+    setNewBarcodeEntry('');
+  };
+
+  const handleRemoveTempBarcode = (index) => {
+    setTempBarcodes(prev => prev.filter((_, i) => i !== index));
+  };
+
   const openCategoryDialog = (cat = null) => {
     if (cat) {
       setEditingItem(cat);
@@ -396,13 +442,12 @@ const InventoryModule = () => {
   };
 
   const filteredCategories = (categories || [])
-  .filter(c => c?.branch_id === branchId) // por las dudas
+  .filter(c => c?.branch_id === branchId)
   .filter(c => {
     if (!filter?.trim()) return true;
     return c.name?.toLowerCase().includes(filter.toLowerCase());
   })
   .sort((a, b) => (a.name || "").localeCompare(b.name || ""));
-
 
   const totalPages = Math.ceil(totalCount / itemsPerPage);
 
@@ -494,7 +539,7 @@ const InventoryModule = () => {
                 <th className="px-6 py-4">Nombre</th>
                 {activeTab === 'products' && (
                   <>
-                    <th className="px-6 py-4 text-center">Código</th>
+                    <th className="px-6 py-4 text-center">Códigos</th>
                     <th className="px-6 py-4">Precio</th>
                     <th className="px-6 py-4 text-center">Stock</th>
                   </>
@@ -509,50 +554,61 @@ const InventoryModule = () => {
                     <Loader2 className="animate-spin mx-auto text-indigo-600 w-8 h-8" />
                   </td>
                 </tr>
-              ) : (activeTab === 'products' ? products : filteredCategories).map((item) => (
-                <tr key={item.id} className="hover:bg-gray-50/50 transition-colors">
-                  <td className="px-6 py-4 font-bold text-gray-900">{item.name}</td>
-                  {activeTab === 'products' && (
-                    <>
-                      <td className="px-6 py-4 text-center">
-                        {item.barcode
-                          ? <span className="bg-gray-100 px-2 py-1 rounded-md font-mono text-[10px] font-bold text-gray-600 border border-gray-200">{item.barcode}</span>
-                          : '-'}
-                      </td>
-                      <td className="px-6 py-4 font-black text-indigo-600">{formatCurrency(item.price)}</td>
-                      <td className="px-6 py-4 text-center">
-                        <span className={`px-2 py-1 rounded text-[10px] font-black ${item.stock > 0 ? 'bg-green-50 text-green-600' : 'bg-red-50 text-red-600'}`}>
-                          {item.stock} U.
-                        </span>
-                      </td>
-                    </>
-                  )}
-                  <td className="px-6 py-4 text-right">
-                    {canEdit ? (
-                      <div className="flex justify-end gap-1">
-                        <Button
-                          onClick={() => activeTab === 'products' ? openProductDialog(item) : openCategoryDialog(item)}
-                          size="icon"
-                          variant="ghost"
-                          className="hover:text-indigo-600"
-                        >
-                          <Edit className="w-4 h-4" />
-                        </Button>
-                        <Button
-                          onClick={() => activeTab === 'products' ? handleDeleteProduct(item.id) : handleDeleteCategory(item.id)}
-                          size="icon"
-                          variant="ghost"
-                          className="hover:text-red-600"
-                        >
-                          <Trash2 className="w-4 h-4" />
-                        </Button>
-                      </div>
-                    ) : (
-                      <span className="text-[10px] text-gray-300 font-bold uppercase italic">Bloqueado</span>
+              ) : (activeTab === 'products' ? products : filteredCategories).map((item) => {
+                const barcodesList = item.product_barcodes?.map(b => b.barcode).filter(Boolean) || [];
+                return (
+                  <tr key={item.id} className="hover:bg-gray-50/50 transition-colors">
+                    <td className="px-6 py-4 font-bold text-gray-900">{item.name}</td>
+                    {activeTab === 'products' && (
+                      <>
+                        <td className="px-6 py-4 text-center">
+                          {barcodesList.length > 0 ? (
+                            <div className="flex flex-wrap justify-center gap-1">
+                              {barcodesList.map((code, idx) => (
+                                <span key={idx} className="bg-gray-100 px-2 py-0.5 rounded-md font-mono text-[10px] font-bold text-gray-600 border border-gray-200">
+                                  {code}
+                                </span>
+                              ))}
+                            </div>
+                          ) : (
+                            <span className="text-gray-400">-</span>
+                          )}
+                        </td>
+                        <td className="px-6 py-4 font-black text-indigo-600">{formatCurrency(item.price)}</td>
+                        <td className="px-6 py-4 text-center">
+                          <span className={`px-2 py-1 rounded text-[10px] font-black ${item.stock > 0 ? 'bg-green-50 text-green-600' : 'bg-red-50 text-red-600'}`}>
+                            {item.stock} U.
+                          </span>
+                        </td>
+                      </>
                     )}
-                  </td>
-                </tr>
-              ))}
+                    <td className="px-6 py-4 text-right">
+                      {canEdit ? (
+                        <div className="flex justify-end gap-1">
+                          <Button
+                            onClick={() => activeTab === 'products' ? openProductDialog(item) : openCategoryDialog(item)}
+                            size="icon"
+                            variant="ghost"
+                            className="hover:text-indigo-600"
+                          >
+                            <Edit className="w-4 h-4" />
+                          </Button>
+                          <Button
+                            onClick={() => activeTab === 'products' ? handleDeleteProduct(item.id) : handleDeleteCategory(item.id)}
+                            size="icon"
+                            variant="ghost"
+                            className="hover:text-red-600"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </Button>
+                        </div>
+                      ) : (
+                        <span className="text-[10px] text-gray-300 font-bold uppercase italic">Bloqueado</span>
+                      )}
+                    </td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
 
@@ -582,13 +638,42 @@ const InventoryModule = () => {
           </DialogHeader>
           <div className="grid gap-4 py-4">
             <div className="grid gap-2">
-              <label className="text-xs font-bold uppercase text-gray-400">Código</label>
-              <Input value={productForm.barcode} onChange={e => setProductForm({ ...productForm, barcode: e.target.value })} placeholder="Opcional" className="rounded-xl" />
-            </div>
-            <div className="grid gap-2">
               <label className="text-xs font-bold uppercase text-gray-400">Nombre</label>
               <Input value={productForm.name} onChange={e => setProductForm({ ...productForm, name: e.target.value })} className="rounded-xl" />
             </div>
+            
+            {online && (
+              <div className="bg-gray-50 p-4 rounded-2xl border border-gray-100 space-y-2">
+                <label className="text-[10px] font-black uppercase text-gray-500">Códigos de Barra (Máx. 5):</label>
+                <div className="flex flex-wrap gap-2">
+                  {tempBarcodes.map((b, idx) => (
+                    <div key={idx} className="flex items-center gap-1.5 bg-white px-2.5 py-1 rounded-xl border text-xs font-mono shadow-sm">
+                      <span>{b.barcode}</span>
+                      <button 
+                        type="button" 
+                        onClick={() => handleRemoveTempBarcode(idx)} 
+                        className="text-red-400 hover:text-red-600 font-bold px-1"
+                      >
+                        ×
+                      </button>
+                    </div>
+                  ))}
+                  {tempBarcodes.length === 0 && <span className="text-xs text-gray-400 italic">Sin códigos asociados</span>}
+                </div>
+                {tempBarcodes.length < 5 && (
+                  <div className="flex gap-2 pt-1">
+                    <Input 
+                      placeholder="Nuevo código de barra..." 
+                      className="bg-white text-xs h-9" 
+                      value={newBarcodeEntry} 
+                      onChange={e => setNewBarcodeEntry(e.target.value)} 
+                    />
+                    <Button size="sm" type="button" onClick={handleAddTempBarcode} className="bg-indigo-600 font-bold h-9">Añadir</Button>
+                  </div>
+                )}
+              </div>
+            )}
+
             <div className="grid gap-2">
               <label className="text-xs font-bold uppercase text-gray-400">Categoría</label>
               <select className="w-full p-2.5 text-sm border border-gray-200 rounded-xl bg-gray-50 outline-none focus:ring-2 focus:ring-indigo-500" value={productForm.category_id} onChange={e => setProductForm({ ...productForm, category_id: e.target.value })}>

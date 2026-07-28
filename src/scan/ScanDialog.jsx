@@ -54,21 +54,28 @@ export default function ScanDialog() {
   const [newPrice, setNewPrice] = useState(0);
   const [newStock, setNewStock] = useState(0);
   const [newCategoryId, setNewCategoryId] = useState("");
+  
+  const [productBarcodes, setProductBarcodes] = useState([]);
+  const [tempBarcodes, setTempBarcodes] = useState([]);
+  const [newBarcodeEntry, setNewBarcodeEntry] = useState("");
 
   const filteredProducts = useMemo(() => {
     const s = (search || "").toLowerCase();
-    return products.filter(p => p.name?.toLowerCase().includes(s) || p.barcode?.includes(s));
+    return products.filter(p => 
+      p.name?.toLowerCase().includes(s) || 
+      (p.product_barcodes || []).some(b => b.barcode.toLowerCase().includes(s))
+    );
   }, [products, search]);
 
   useEffect(() => {
     if (!isOpen) return;
     
-    // Limpiar campos del formulario de nuevo producto cada vez que cambia el código de barras o se abre el diálogo
     setNewName("");
     setNewPrice(0);
     setNewStock(0);
     setNewCategoryId("");
     setSearch("");
+    setNewBarcodeEntry("");
 
     if (matches?.length === 1) {
       const p = matches[0];
@@ -78,10 +85,25 @@ export default function ScanDialog() {
       setSaleQty(1);
       setAmountReceived(0);
       setActiveTab("sale");
+      fetchProductBarcodes(p.id);
     } else {
       setViewProduct(null);
+      setProductBarcodes([]);
+      setTempBarcodes([]);
     }
   }, [isOpen, matches, barcode]);
+
+  const fetchProductBarcodes = async (productId) => {
+    if (online) {
+      const { data } = await supabase.from("product_barcodes").select("*").eq("product_id", productId);
+      const list = data || [];
+      setProductBarcodes(list);
+      setTempBarcodes(list);
+    } else {
+      setProductBarcodes([]);
+      setTempBarcodes([]);
+    }
+  };
 
   useEffect(() => {
     if (isOpen && branchId) fetchInitialData();
@@ -92,7 +114,7 @@ export default function ScanDialog() {
     try {
       if (online) {
         const [prodsRes, catsRes, payRes] = await Promise.all([
-          supabase.from("products").select("*").eq("branch_id", branchId).order("name"),
+          supabase.from("products").select("*, product_barcodes(*)").eq("branch_id", branchId).order("name"),
           supabase.from("categories").select("*").eq("branch_id", branchId).order("name"),
           supabase.from('payment_methods').select('*').eq('branch_id', branchId).eq('is_active', true).order('name', { ascending: true })
         ]);
@@ -127,6 +149,8 @@ export default function ScanDialog() {
     setNewStock(0);
     setNewCategoryId("");
     setSearch("");
+    setProductBarcodes([]);
+    setTempBarcodes([]);
   };
 
   const subtotal = useMemo(() => cart.reduce((acc, it) => acc + (it.price * it.quantity), 0), [cart]);
@@ -156,7 +180,6 @@ export default function ScanDialog() {
     if (cart.length === 0 || !selectedPaymentMethod) return;
     setIsProcessing(true);
     try {
-      // 1. Verificación de Stock (Local)
       for (const item of cart) {
         if (!item.is_custom) {
           const prod = products.find(p => p.id === item.id);
@@ -168,7 +191,6 @@ export default function ScanDialog() {
       }
 
       if (!online) {
-        // --- PROCESO OFFLINE ---
         const localSaleId = `local-scan-${Date.now()}`;
         const localSale = {
           id: localSaleId,
@@ -214,7 +236,6 @@ export default function ScanDialog() {
         toast({ title: "Venta guardada offline" });
         await refreshPending();
       } else {
-        // --- PROCESO ONLINE ---
         const { data: sale, error: saleError } = await supabase.from('sales').insert([{
           branch_id: branchId, customer_name: 'Cliente General', total: cartTotal, payment_method: selectedPaymentMethod.name
         }]).select().single();
@@ -232,7 +253,6 @@ export default function ScanDialog() {
 
         await supabase.from('sale_items').insert(saleItems);
         
-        // Actualizar stock por RPC o loop
         const stockItems = cart.filter(i => !i.is_custom);
         for (const item of stockItems) {
             const { data: p } = await supabase.from('products').select('stock').eq('id', item.id).single();
@@ -254,7 +274,7 @@ export default function ScanDialog() {
   const createProductWithBarcode = async () => {
     if (!newName || !newCategoryId) return;
     const payload = { 
-      name: newName, price: newPrice, stock: newStock, barcode, 
+      name: newName, price: newPrice, stock: newStock, 
       branch_id: branchId, category_id: newCategoryId 
     };
 
@@ -265,26 +285,92 @@ export default function ScanDialog() {
       await enqueueAction({ type: "product:create", payload: { id: localId, ...payload } });
       toast({ title: "Producto creado offline" });
     } else {
-      const { error } = await supabase.from("products").insert([payload]);
+      const { data: newProd, error } = await supabase.from("products").insert([payload]).select().single();
       if (error) { toast({title: "Error al crear", variant: "destructive"}); return; }
+      
+      if (barcode && newProd) {
+        await supabase.from("product_barcodes").insert([{ product_id: newProd.id, barcode }]);
+      }
     }
     
     window.dispatchEvent(new Event('inventory:refresh'));
     openWithCode(barcode);
   };
 
-  const associateBarcode = async (p) => {
-    if (!online) {
-      const db = await initOfflineDb();
-      const product = await db.get("products", p.id);
-      const updated = { ...product, barcode };
-      await db.put("products", updated);
-      await enqueueAction({ type: "product:update", payload: { id: p.id, barcode } });
-      toast({ title: "Vínculo guardado offline" });
-    } else {
-      const { error } = await supabase.from("products").update({ barcode }).eq("id", p.id);
-      if (error) { toast({title: "Error al vincular", variant: "destructive"}); return; }
+  const handleAddTempBarcode = () => {
+    if (!newBarcodeEntry.trim()) return;
+    if (tempBarcodes.length >= 5) {
+      toast({ title: "Límite alcanzado", description: "Un producto puede tener máximo 5 códigos de barra.", variant: "destructive" });
+      return;
     }
+    const exists = tempBarcodes.some(b => b.barcode === newBarcodeEntry.trim());
+    if (exists) {
+      toast({ title: "Duplicado", description: "Este código ya está en la lista.", variant: "destructive" });
+      return;
+    }
+
+    setTempBarcodes(prev => [...prev, { barcode: newBarcodeEntry.trim() }]);
+    setNewBarcodeEntry("");
+  };
+
+  const handleRemoveTempBarcode = (index) => {
+    setTempBarcodes(prev => prev.filter((_, i) => i !== index));
+  };
+
+  const handleSaveEditChanges = async () => {
+    if (!viewProduct) return;
+
+    await updateProductFields(viewProduct.id, { price: editPrice, stock: editStock });
+
+    if (online) {
+      const currentIds = tempBarcodes.map(b => b.id).filter(Boolean);
+      const toDelete = productBarcodes.filter(b => !currentIds.includes(b.id));
+
+      for (const item of toDelete) {
+        if (item.id) {
+          await supabase.from("product_barcodes").delete().eq("id", item.id);
+        }
+      }
+
+      const toInsert = tempBarcodes.filter(b => !b.id);
+      for (const item of toInsert) {
+        await supabase.from("product_barcodes").insert([{
+          product_id: viewProduct.id,
+          barcode: item.barcode
+        }]);
+      }
+    }
+
+    toast({ title: "Guardado con éxito" });
+    window.dispatchEvent(new Event('inventory:refresh'));
+    fetchProductBarcodes(viewProduct.id);
+  };
+
+  const associateBarcode = async (p) => {
+    if (online) {
+      const { count } = await supabase.from("product_barcodes").select("*", { count: 'exact', head: true }).eq("product_id", p.id);
+      if (count >= 5) {
+        toast({ title: "Límite de 5 códigos alcanzado", variant: "destructive" });
+        return;
+      }
+      const { error } = await supabase.from("product_barcodes").insert([{ product_id: p.id, barcode }]);
+      if (error) { toast({title: "Error al vincular (quizás ya esté en uso)", variant: "destructive"}); return; }
+      
+      toast({ title: "Código vinculado con éxito" });
+
+      // Actualizamos el estado local de products para que el cambio se refleje al instante en el diálogo y la lista
+      setProducts(prev => prev.map(prod => {
+        if (prod.id === p.id) {
+          return {
+            ...prod,
+            product_barcodes: [...(prod.product_barcodes || []), { product_id: p.id, barcode }]
+          };
+        }
+        return prod;
+      }));
+    }
+
+    window.dispatchEvent(new Event('inventory:refresh'));
     openWithCode(barcode); 
   };
 
@@ -313,7 +399,7 @@ export default function ScanDialog() {
               <div className="flex justify-center pb-4">
                 <div className="flex justify-center gap-1 md:gap-2 bg-gray-100 p-1 rounded-2xl w-fit shadow-sm border border-gray-200/50">
                   <button onClick={() => setActiveTab("sale")} className={`px-4 md:px-6 py-2 rounded-xl text-[10px] md:text-xs font-black transition-all ${activeTab === "sale" ? "bg-white text-indigo-600 shadow-sm" : "text-gray-500"}`}>VENDER</button>
-                  <button onClick={() => setActiveTab("edit")} className={`px-4 md:px-6 py-2 rounded-xl text-[10px] md:text-xs font-black transition-all ${activeTab === "edit" ? "bg-white text-indigo-600 shadow-sm" : "text-gray-500"}`}>EDITAR INFO</button>
+                  <button onClick={() => { setActiveTab("edit"); fetchProductBarcodes(viewProduct.id); }} className={`px-4 md:px-6 py-2 rounded-xl text-[10px] md:text-xs font-black transition-all ${activeTab === "edit" ? "bg-white text-indigo-600 shadow-sm" : "text-gray-500"}`}>EDITAR INFO</button>
                   <button onClick={() => setActiveTab("cart")} className={`px-4 md:px-6 py-2 rounded-xl text-[10px] md:text-xs font-black transition-all ${activeTab === "cart" ? "bg-white text-indigo-600 shadow-sm" : "text-gray-500"}`}>CARRITO ({cart.length})</button>
                 </div>
               </div>
@@ -332,10 +418,33 @@ export default function ScanDialog() {
               )}
 
               {activeTab === "edit" && viewProduct && (
-                <div className="max-w-2xl mx-auto grid grid-cols-2 gap-6">
-                  <div className="bg-white p-6 rounded-3xl border border-gray-100 shadow-sm space-y-2"><p className="text-[10px] font-black text-gray-400 uppercase">Stock Físico</p><Input type="number" className="text-3xl font-bold h-16 text-center" value={editStock} onFocus={e => e.target.select()} onChange={e => setEditStock(Number(e.target.value))} /></div>
-                  <div className="bg-white p-6 rounded-3xl border border-gray-100 shadow-sm space-y-2"><p className="text-[10px] font-black text-indigo-400 uppercase">Precio Venta</p><Input type="number" className="text-3xl font-bold h-16 text-center text-indigo-600" value={editPrice} onFocus={e => e.target.select()} onChange={e => setEditPrice(Number(e.target.value))} /></div>
-                  <Button onClick={async () => { await updateProductFields(viewProduct.id, { price: editPrice, stock: editStock }); toast({ title: "Guardado" }); window.dispatchEvent(new Event('inventory:refresh')); }} className="col-span-2 py-7 bg-emerald-600 text-white font-black rounded-3xl">GUARDAR CAMBIOS</Button>
+                <div className="max-w-2xl mx-auto space-y-6">
+                  <div className="grid grid-cols-2 gap-6">
+                    <div className="bg-white p-6 rounded-3xl border border-gray-100 shadow-sm space-y-2"><p className="text-[10px] font-black text-gray-400 uppercase">Stock Físico</p><Input type="number" className="text-3xl font-bold h-16 text-center" value={editStock} onFocus={e => e.target.select()} onChange={e => setEditStock(Number(e.target.value))} /></div>
+                    <div className="bg-white p-6 rounded-3xl border border-gray-100 shadow-sm space-y-2"><p className="text-[10px] font-black text-indigo-400 uppercase">Precio Venta</p><Input type="number" className="text-3xl font-bold h-16 text-center text-indigo-600" value={editPrice} onFocus={e => e.target.select()} onChange={e => setEditPrice(Number(e.target.value))} /></div>
+                  </div>
+
+                  <div className="bg-gray-50 p-6 rounded-3xl border border-gray-100 space-y-3">
+                    <p className="text-xs font-black text-gray-700 uppercase">Códigos de Barra (Máx. 5):</p>
+                    <div className="flex flex-wrap gap-2">
+                      {tempBarcodes.map((b, idx) => (
+                        <div key={idx} className="flex items-center gap-2 bg-white px-3 py-1.5 rounded-xl border border-gray-200 text-xs font-mono shadow-sm">
+                          <span>{b.barcode}</span>
+                          <button type="button" onClick={() => handleRemoveTempBarcode(idx)} className="text-red-400 hover:text-red-600 font-bold px-1">×</button>
+                        </div>
+                      ))}
+                      {tempBarcodes.length === 0 && <span className="text-xs text-gray-400">Sin códigos adicionales</span>}
+                    </div>
+
+                    {tempBarcodes.length < 5 && (
+                      <div className="flex gap-2 pt-2">
+                        <Input placeholder="Nuevo código de barra..." className="bg-white text-xs" value={newBarcodeEntry} onChange={e => setNewBarcodeEntry(e.target.value)} />
+                        <Button size="sm" type="button" onClick={handleAddTempBarcode} className="bg-indigo-600 font-bold">Añadir</Button>
+                      </div>
+                    )}
+                  </div>
+
+                  <Button onClick={handleSaveEditChanges} className="w-full py-7 bg-emerald-600 hover:bg-emerald-700 text-white font-black rounded-3xl shadow-lg">GUARDAR CAMBIOS</Button>
                 </div>
               )}
 

@@ -42,12 +42,32 @@ export default function ScanProvider({ children }) {
       let data = [];
 
       if (navigator.onLine) {
-        const res = await supabase.from("products").select("*").eq("branch_id", branchId).eq("barcode", cleanCode);
-        data = res.data || [];
+        // Buscamos estrictamente en la nueva tabla relacional product_barcodes
+        const { data: barcodeMatches, error: barcodeError } = await supabase
+          .from("product_barcodes")
+          .select("product_id")
+          .eq("barcode", cleanCode);
+
+        if (barcodeError) throw barcodeError;
+
+        const productIds = (barcodeMatches || []).map(b => b.product_id);
+
+        if (productIds.length > 0) {
+          const { data: prods, error: prodsError } = await supabase
+            .from("products")
+            .select("*, product_barcodes(*)")
+            .eq("branch_id", branchId)
+            .in("id", productIds);
+
+          if (prodsError) throw prodsError;
+          data = prods || [];
+        }
       } else {
-        // LÓGICA OFFLINE: Buscar en IndexedDB
+        // LÓGICA OFFLINE: Buscar en IndexedDB exclusivamente por la nueva relación
         const cachedProducts = await getProductsByBranch(branchId);
-        data = cachedProducts.filter(p => p.barcode === cleanCode);
+        data = cachedProducts.filter(p => 
+          (p.product_barcodes || []).some(b => b.barcode === cleanCode)
+        );
       }
       setMatches(data);
     } catch (e) { 
@@ -60,7 +80,7 @@ export default function ScanProvider({ children }) {
   const updateProductFields = useCallback(async (productId, updates) => {
     try {
       if (navigator.onLine) {
-        const { data, error } = await supabase.from("products").update(updates).eq("id", productId).select().single();
+        const { data, error } = await supabase.from("products").update(updates).eq("id", productId).select("*, product_barcodes(*)").single();
         if (error) throw error;
         setMatches(prev => prev.map(p => p.id === productId ? data : p));
         return { data, error: null };

@@ -62,7 +62,7 @@ const SalesModule = () => {
 
   const [cart, setCart] = useState([]);
   const [selectedPaymentMethod, setSelectedPaymentMethod] = useState(null);
-  const [selectedInstallment, setSelectedInstallment] = useState(null); // Manual por defecto
+  const [selectedInstallment, setSelectedInstallment] = useState(null);
   const [isProcessing, setIsProcessing] = useState(false);
   const [branchDetails, setBranchDetails] = useState({ name: '', logo_url: '', address: '', tel: '' });
   
@@ -133,11 +133,32 @@ const SalesModule = () => {
       if (online) {
         const from = (currentPage - 1) * itemsPerPage;
         const to = from + itemsPerPage - 1;
-        let query = supabase.from("products").select("*, categories(name)", { count: "exact" }).eq("branch_id", branchId).order("name", { ascending: true }).range(from, to);
+        
+        let query = supabase
+          .from("products")
+          .select("*, categories(name), product_barcodes(*)", { count: "exact" })
+          .eq("branch_id", branchId)
+          .order("name", { ascending: true })
+          .range(from, to);
+
         if (searchTerm) {
-          query = query.or(`name.ilike.%${searchTerm}%,barcode.ilike.%${searchTerm}%`);
+          // Buscamos exclusivamente en la nueva tabla product_barcodes
+          const { data: matchingBarcodes } = await supabase
+            .from("product_barcodes")
+            .select("product_id")
+            .ilike("barcode", `%${searchTerm}%`);
+          
+          const matchedProductIds = (matchingBarcodes || []).map(b => b.product_id);
+
+          if (matchedProductIds.length > 0) {
+            query = query.or(`name.ilike.%${searchTerm}%,id.in.(${matchedProductIds.join(',')})`);
+          } else {
+            query = query.ilike("name", `%${searchTerm}%`);
+          }
         }
+
         if (selectedCategory !== "all") query = query.eq("category_id", selectedCategory);
+        
         const { data, count, error } = await query;
         if (error) throw error;
         setProducts(data || []);
@@ -147,7 +168,10 @@ const SalesModule = () => {
         let cached = await getProductsByBranch(branchId);
         if (searchTerm) {
           const s = searchTerm.toLowerCase();
-          cached = cached.filter(p => (p.name || "").toLowerCase().includes(s) || (p.barcode || "").toLowerCase().includes(s));
+          cached = cached.filter(p => 
+            (p.name || "").toLowerCase().includes(s) || 
+            (p.product_barcodes || []).some(b => b.barcode.toLowerCase().includes(s))
+          );
         }
         if (selectedCategory !== "all") {
           cached = cached.filter(p => p.category_id === selectedCategory);
@@ -172,6 +196,15 @@ const SalesModule = () => {
       fetchBranchDetails();
     }
   }, [branchId, fetchProducts, online]);
+
+  // Escuchar eventos globales de actualización para reflejar cambios automáticos sin F5
+  useEffect(() => {
+    const handleRefresh = () => {
+      fetchProducts();
+    };
+    window.addEventListener("inventory:refresh", handleRefresh);
+    return () => window.removeEventListener("inventory:refresh", handleRefresh);
+  }, [fetchProducts]);
 
   useEffect(() => { setCurrentPage(1); }, [searchTerm, selectedCategory]);
 
@@ -291,7 +324,6 @@ const SalesModule = () => {
         if (stockPayload.length) await decrementLocalStock(stockPayload);
 
         toast({ title: "Venta guardada (offline)" });
-        if (SHOW_RECEIPT_OPTION && finalNeedsReceipt === "yes") generateSalePDF(localSale, cart);
       } else {
         const { data: sale, error: saleError } = await supabase.from("sales").insert([{ branch_id: branchId, customer_name: safeCustomerName, total, payment_method: finalMethodName }]).select().single();
         if (saleError) throw saleError;
@@ -305,7 +337,6 @@ const SalesModule = () => {
         }
 
         toast({ title: "Venta realizada con éxito" });
-        if (SHOW_RECEIPT_OPTION && finalNeedsReceipt === "yes") generateSalePDF(sale, cart);
       }
 
       setCustomerName(""); 
@@ -319,63 +350,6 @@ const SalesModule = () => {
     } finally {
       setIsProcessing(false);
     }
-  };
-
-  const generateSalePDF = (sale, items) => {
-    const element = document.createElement('div');
-    element.innerHTML = `
-      <div style="font-family: Arial, sans-serif; padding: 40px; color: #333; background: white; width: 750px; margin: 0 auto;">
-        <div style="text-align: center; margin-bottom: 40px;">
-          ${branchDetails.logo_url ? `<img src="${branchDetails.logo_url}" style="max-height: 120px; display: block; margin: 0 auto 15px auto;" />` : ''}
-          <h1 style="font-size: 32px; font-weight: 900; margin: 0; text-transform: uppercase;">${branchDetails.name || 'SUCURSAL'}</h1>
-          <p style="font-size: 14px; color: #666; letter-spacing: 2px; margin-top: 10px; font-weight: bold;">COMPROBANTE DE COMPRA</p>
-        </div>
-        <div style="display: flex; justify-content: space-between; margin-bottom: 30px; font-size: 14px; border-bottom: 2px solid #f0f0f0; padding-bottom: 25px;">
-          <div>
-            <p style="margin: 5px 0;"><strong>CLIENTE:</strong> ${sale.customer_name}</p>
-            <p style="margin: 5px 0;"><strong>MÉTODO:</strong> ${sale.payment_method}</p>
-            <p style="margin: 5px 0;"><strong>FECHA:</strong> ${formatDateTime(sale.created_at).split(',')[0]}</p>
-          </div>
-          <div style="text-align: right;">
-            <p style="margin: 5px 0;"><strong>DIRECCIÓN:</strong> ${branchDetails.address || 'No disponible'}</p>
-            <p style="margin: 5px 0;"><strong>WHATSAPP:</strong> ${branchDetails.tel || 'No disponible'}</p>
-          </div>
-        </div>
-        <table style="width: 100%; border-collapse: collapse; margin-bottom: 40px;">
-          <thead>
-            <tr>
-              <th style="text-align: left; padding: 10px 0; border-bottom: 2px solid #e2e8f0; font-size: 12px; color: #888;">DESCRIPCIÓN</th>
-              <th style="text-align: center; padding: 10px 0; border-bottom: 2px solid #e2e8f0; font-size: 12px; color: #888;">CANT.</th>
-              <th style="text-align: right; padding: 10px 0; border-bottom: 2px solid #e2e8f0; font-size: 12px; color: #888;">P. UNIT</th>
-              <th style="text-align: right; padding: 10px 0; border-bottom: 2px solid #e2e8f0; font-size: 12px; color: #888;">SUBTOTAL</th>
-            </tr>
-          </thead>
-          <tbody>
-            ${items.map(p => `
-              <tr>
-                <td style="padding: 15px 0; border-bottom: 1px solid #f1f5f9; font-size: 14px;">${p.product_name || p.name}</td>
-                <td style="padding: 15px 0; border-bottom: 1px solid #f1f5f9; font-size: 14px; text-align: center;">${p.quantity}</td>
-                <td style="padding: 15px 0; border-bottom: 1px solid #f1f5f9; font-size: 14px; text-align: right;">$${Number(p.unit_price || p.price).toLocaleString('es-AR')}</td>
-                <td style="padding: 15px 0; border-bottom: 1px solid #f1f5f9; font-size: 14px; text-align: right; font-weight: bold;">$${(Number(p.unit_price || p.price) * p.quantity).toLocaleString('es-AR')}</td>
-              </tr>
-            `).join('')}
-          </tbody>
-        </table>
-        <div style="display: flex; flex-direction: column; align-items: flex-end;">
-          <div style="width: 250px; border-top: 4px solid #000; padding-top: 15px; display: flex; justify-content: space-between; font-size: 20px; font-weight: 900;">
-            <span>TOTAL:</span> <span>$${Number(sale.total).toLocaleString('es-AR')}</span>
-          </div>
-        </div>
-      </div>
-    `;
-    const opt = { margin: 0, filename: `Venta_${sale.id}.pdf`, image: { type: 'jpeg', quality: 0.98 }, html2canvas: { scale: 2, useCORS: true }, jsPDF: { unit: 'in', format: 'A4', orientation: 'portrait' } };
-    const pdfWindow = window.open("", "_blank");
-    window.html2pdf().from(element).set(opt).toPdf().get('pdf').then((pdf) => {
-      const blob = pdf.output('blob');
-      const fileURL = URL.createObjectURL(blob);
-      if (pdfWindow) pdfWindow.location.href = fileURL;
-      else window.open(fileURL, '_blank');
-    });
   };
 
   const totalPages = Math.ceil(totalCount / itemsPerPage);
@@ -451,24 +425,31 @@ const SalesModule = () => {
                   <div className="text-center text-gray-400 mt-10">No se encontraron productos</div>
                 ) : (
                   <div className="grid grid-cols-2 md:grid-cols-3 gap-3 md:gap-4">
-                    {products.map(product => (
-                      <Card key={product.id} className="cursor-pointer hover:border-indigo-500 transition-all active:scale-95 group" onClick={() => addToCart(product)}>
-                        <CardContent className="p-3 md:p-4">
-                          <div className="flex justify-between items-start mb-2">
-                            <div className="h-8 w-8 md:h-10 md:w-10 rounded-lg bg-indigo-50 flex items-center justify-center text-indigo-600 font-bold text-[10px] md:text-xs uppercase">{product.name.substring(0, 2)}</div>
-                            <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-medium ${product.stock > 0 ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>
-                              Stock: {product.stock}
-                            </span>
-                          </div>
-                          <h3 className="text-xs md:text-sm font-medium text-gray-900 line-clamp-2 h-8 md:h-10 mb-1">{product.name}</h3>
-                          <div className="flex items-center gap-1 text-[11px] text-gray-400 mb-1">
-                            <Barcode className="w-3.5 h-3.5 shrink-0" />
-                            <span className="truncate">{product.barcode || 'Sin código'}</span>
-                          </div>
-                          <p className="text-sm md:text-lg font-bold text-indigo-600">{formatCurrency(product.price)}</p>
-                        </CardContent>
-                      </Card>
-                    ))}
+                    {products.map(product => {
+                      const allBarcodes = product.product_barcodes?.map(b => b.barcode).filter(Boolean) || [];
+                      const barcodeText = allBarcodes.length > 0 ? allBarcodes.join(', ') : 'Sin código';
+
+                      return (
+                        <Card key={product.id} className="cursor-pointer hover:border-indigo-500 transition-all active:scale-95 group" onClick={() => addToCart(product)}>
+                          <CardContent className="p-3 md:p-4">
+                            <div className="flex justify-between items-start mb-2">
+                              <div className="h-8 w-8 md:h-10 md:w-10 rounded-lg bg-indigo-50 flex items-center justify-center text-indigo-600 font-bold text-[10px] md:text-xs uppercase">{product.name.substring(0, 2)}</div>
+                              <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-medium ${product.stock > 0 ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>
+                                Stock: {product.stock}
+                              </span>
+                            </div>
+                            <h3 className="text-xs md:text-sm font-medium text-gray-900 line-clamp-2 h-8 md:h-10 mb-1">{product.name}</h3>
+                            <div className="flex items-center gap-1 text-[11px] text-gray-400 mb-1">
+                              <Barcode className="w-3.5 h-3.5 shrink-0" />
+                              <span className="truncate" title={barcodeText}>
+                                {barcodeText}
+                              </span>
+                            </div>
+                            <p className="text-sm md:text-lg font-bold text-indigo-600">{formatCurrency(product.price)}</p>
+                          </CardContent>
+                        </Card>
+                      );
+                    })}
                   </div>
                 )}
               </div>
@@ -538,23 +519,6 @@ const SalesModule = () => {
                 </div>
 
                 <div className="p-4 space-y-4">
-                  {SHOW_CUSTOMER_INPUT && (
-                    <div className="space-y-2">
-                      <label className="text-[10px] font-bold text-gray-500 uppercase tracking-wider flex items-center gap-1"><User className="w-3 h-3" /> Cliente (opcional)</label>
-                      <Input placeholder="Nombre del cliente..." className="h-9 text-xs bg-white" value={customerName} onChange={(e) => setCustomerName(e.target.value)} />
-                    </div>
-                  )}
-
-                  {SHOW_RECEIPT_OPTION && (
-                    <div className="space-y-2">
-                      <label className="text-[10px] font-bold text-gray-500 uppercase tracking-wider">¿Generar Comprobante PDF?</label>
-                      <select className="flex h-10 w-full rounded-xl border border-input bg-white px-3 py-2 text-xs font-bold focus:ring-2 focus:ring-indigo-500" value={needsReceipt} onChange={e => setNeedsReceipt(e.target.value)}>
-                        <option value="no">No, solo registrar</option>
-                        <option value="yes">Sí, generar y abrir PDF</option>
-                      </select>
-                    </div>
-                  )}
-
                   <div className="space-y-2">
                     <div className="flex justify-between items-end">
                        <label className="text-[10px] font-bold text-gray-500 uppercase tracking-wider">Método de Pago</label>
