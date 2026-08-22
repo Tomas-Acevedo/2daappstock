@@ -220,7 +220,6 @@ const JornadasPage = () => {
   };
 
   const handleSubmit = async () => {
-    // Validación: Salida ahora es opcional si está vacía
     if (!formData.employee_id || !formData.date || !formData.clock_in) {
       toast({ title: "Faltan datos obligatorios", variant: "destructive" });
       return;

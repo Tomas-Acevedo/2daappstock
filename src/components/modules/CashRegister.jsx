@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
-import { useParams } from 'react-router-dom';
+import { useParams, useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Wallet, Plus, Calendar, Loader2, Clock, Trash2, Lock, CreditCard, Info, ArrowRight, Pencil } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -18,6 +18,7 @@ import {
   getCashDayOffline,
   cacheSalesAndItems,
   enqueueAction,
+  initOfflineDb,
 } from "@/lib/offlineDb";
 import {
   Dialog,
@@ -29,6 +30,7 @@ import {
 
 const CashRegister = () => {
   const { branchId } = useParams();
+  const navigate = useNavigate();
   const { user } = useAuth();
   const { online, syncing } = useOffline();
 
@@ -94,7 +96,6 @@ const CashRegister = () => {
         const currentRegister = registers?.[0] || null;
         setRegisterData(currentRegister);
         
-        // Verificamos mediante sessionStorage o si el registro fue marcado localmente
         const editedKey = `edited_opening_${currentRegister?.id}`;
         if (currentRegister && sessionStorage.getItem(editedKey) === 'true') {
           setHasEditedOpening(true);
@@ -137,6 +138,49 @@ const CashRegister = () => {
   }, [branchId, effectiveStartDate, effectiveEndDate, online]);
 
   useEffect(() => { fetchRegisterData(); }, [fetchRegisterData]);
+
+  // Validar si hay alguien trabajando en curso (sin clock_out) hoy antes de abrir caja
+  const handleOpenAttempt = async () => {
+    const today = getArgentinaDate();
+    let hasActiveWorker = false;
+
+    try {
+      if (online) {
+        const { data, error } = await supabase
+          .from('attendance_logs')
+          .select('id')
+          .eq('branch_id', branchId)
+          .eq('date', today)
+          .is('clock_out', null)
+          .limit(1);
+
+        if (!error && data && data.length > 0) {
+          hasActiveWorker = true;
+        }
+      } else {
+        const db = await initOfflineDb();
+        const allLogs = await db.getAllFromIndex("attendance_logs", "branch_id", branchId);
+        const activeLogs = allLogs.filter(l => l.date === today && !l.clock_out);
+        if (activeLogs.length > 0) {
+          hasActiveWorker = true;
+        }
+      }
+    } catch (e) {
+      console.error(e);
+    }
+
+    if (!hasActiveWorker) {
+      toast({
+        title: "Acción bloqueada",
+        description: "Debe haber al menos un empleado con la jornada en curso (Entrada activa) para poder iniciar la caja.",
+        variant: "destructive"
+      });
+      navigate(`/branch/${branchId}/jornadas`);
+      return;
+    }
+
+    setIsStartDialogOpen(true);
+  };
 
   const handleStartRegister = async () => {
     try {
@@ -182,7 +226,6 @@ const CashRegister = () => {
         await enqueueAction({ type: "cash_register:update", payload: updatedPayload });
       }
 
-      // Guardamos en sessionStorage para bloquear ediciones futuras en esta sesión/caja
       sessionStorage.setItem(`edited_opening_${registerData.id}`, 'true');
 
       setHasEditedOpening(true);
@@ -283,7 +326,7 @@ const CashRegister = () => {
             <Calendar className="w-12 h-12 text-gray-300 mx-auto mb-4" />
             <h2 className="text-xl font-semibold text-gray-900 mb-2">No hay registros</h2>
             {(effectiveStartDate === getArgentinaDate() || isOwner) ? (
-              <Button onClick={() => setIsStartDialogOpen(true)} className="bg-green-600 mt-4">Abrir Caja</Button>
+              <Button onClick={handleOpenAttempt} className="bg-green-600 mt-4">Abrir Caja</Button>
             ) : <p className="text-amber-600 font-medium mt-4">No se abrió caja en esta fecha.</p>}
           </motion.div>
         ) : (
