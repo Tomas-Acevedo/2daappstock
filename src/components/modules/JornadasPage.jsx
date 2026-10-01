@@ -37,6 +37,7 @@ const JornadasPage = () => {
   const [filters, setFilters] = useState({
     start: format(new Date(), "yyyy-MM-dd"),
     end: format(new Date(), "yyyy-MM-dd"),
+    employee_id: "all",
   });
 
   const [formData, setFormData] = useState({
@@ -48,7 +49,7 @@ const JornadasPage = () => {
 
   useEffect(() => {
     fetchData();
-  }, [branchId, filters.start, filters.end, online]);
+  }, [branchId, filters.start, filters.end, filters.employee_id, online]);
 
   useEffect(() => {
     const handleSyncRefresh = () => {
@@ -83,6 +84,9 @@ const JornadasPage = () => {
 
         if (isOwner) {
           query = query.gte("date", filters.start).lte("date", filters.end);
+          if (filters.employee_id && filters.employee_id !== "all") {
+            query = query.eq("employee_id", filters.employee_id);
+          }
         } else {
           query = query.eq("date", format(new Date(), "yyyy-MM-dd"));
         }
@@ -96,7 +100,11 @@ const JornadasPage = () => {
         const allLogs = await db.getAllFromIndex("attendance_logs", "branch_id", branchId);
         let filtered = allLogs;
         if (isOwner) {
-          filtered = allLogs.filter((l) => l.date >= filters.start && l.date <= filters.end);
+          filtered = allLogs.filter((l) => {
+            const matchesDate = l.date >= filters.start && l.date <= filters.end;
+            const matchesEmployee = filters.employee_id === "all" || l.employee_id === filters.employee_id;
+            return matchesDate && matchesEmployee;
+          });
         } else {
           filtered = allLogs.filter((l) => l.date === format(new Date(), "yyyy-MM-dd"));
         }
@@ -312,10 +320,20 @@ const JornadasPage = () => {
             </p>
           )}
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           {isOwner && (
             <>
               <Button onClick={openCreateDialog} className="bg-indigo-600 hover:bg-indigo-700"><Plus className="w-4 h-4 mr-2" /> Manual</Button>
+              <select
+                className="h-10 border rounded-lg px-3 text-xs font-bold bg-white shadow-sm outline-none text-gray-700"
+                value={filters.employee_id}
+                onChange={(e) => setFilters({ ...filters, employee_id: e.target.value })}
+              >
+                <option value="all">Todos los empleados</option>
+                {employees.map((emp) => (
+                  <option key={emp.id} value={emp.id}>{emp.name}</option>
+                ))}
+              </select>
               <div className="flex items-center gap-2 bg-white p-2 rounded-lg border shadow-sm">
                 <Input type="date" value={filters.start} onChange={(e) => setFilters({ ...filters, start: e.target.value })} className="h-8 border-none focus-visible:ring-0 text-xs font-bold" />
                 <span className="text-gray-400">-</span>
@@ -433,5 +451,4 @@ const JornadasPage = () => {
     </div>
   );
 };
-
 export default JornadasPage;
